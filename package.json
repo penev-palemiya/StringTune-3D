@@ -1,0 +1,77 @@
+{
+  "name": "string-tune-3d",
+  "version": "0.0.1",
+  "description": "StringTune-3D is a powerful 3D graphics adapter library that provides a unified interface for working with different 3D engines like Three.js. Part of the StringTune ecosystem, it enables seamless integration and synchronization of 3D objects, scenes, cameras, and lights across various rendering engines.",
+  "keywords": [
+    "3d",
+    "threejs",
+    "three",
+    "stringtune",
+    "typescript",
+    "3d-graphics",
+    "3d-engine",
+    "webgl",
+    "rendering",
+    "3d-adapter",
+    "graphics-library",
+    "scene-management",
+    "3d-synchronization",
+    "camera-control",
+    "mesh-renderer",
+    "lighting-system",
+    "3d-objects",
+    "engine-adapter",
+    "unified-3d-api",
+    "web-3d",
+    "3d-abstraction",
+    "graphics-adapter",
+    "renderer-adapter",
+    "3d-web-framework"
+  ],
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "unpkg": "dist/index.js",
+  "jsdelivr": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "exports": {
+    ".": {
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:prod": "tsup --sourcemap false",
+    "prepare": "npm run build:prod"
+  },
+  "sideEffects": false,
+  "author": {
+    "name": "Penev Vladislav",
+    "email": "penev.vladislav@gmail.com",
+    "url": "https://penev.tech"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/penev-tech/stringtune-3d"
+  },
+  "homepage": "https://github.com/penev-tech/stringtune-3d#readme",
+  "bugs": {
+    "url": "https://github.com/penev-tech/stringtune-3d/issues"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@fiddle-digital/string-tune": "^1.1.45"
+  },
+  "devDependencies": {
+    "@fiddle-digital/string-tune": "^1.1.45",
+    "@types/node": "^20.4.2",
+    "terser": "^5.19.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.1.6"
+  },
+  "private": false
+}
