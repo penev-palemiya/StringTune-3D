@@ -30,11 +30,20 @@ export class String3DObject {
     return this._children;
   }
 
-  constructor(id: string, type: string, object: I3DObject, engine: I3DEngine) {
+  constructor(
+    id: string,
+    type: string,
+    object: I3DObject,
+    engine: I3DEngine,
+    options: { material?: I3DMaterial; geometry?: I3DGeometry; texture?: any } = {}
+  ) {
     this.id = id;
     this.type = type;
     this._object = object;
     this.engine = engine;
+    this._material = options.material;
+    this._geometry = options.geometry;
+    this._texture = options.texture;
     this._quaternion = engine.createQuaternion();
     this._originalSize = engine.createVector3();
     this._bbox = engine.createBox3();
@@ -152,14 +161,49 @@ export class String3DObject {
     }
   }
 
+  public set material(material: I3DMaterial | undefined) {
+    this._material = material;
+  }
+
+  public set geometry(geometry: I3DGeometry | undefined) {
+    this._geometry = geometry;
+  }
+
   public updateBoundingBox(): void {
     this._bbox.setFromObject(this._object);
     this._bbox.getSize(this._originalSize);
   }
 
   public destroy(): void {
+    this.disposeObjectResources(this._object);
     this._texture?.dispose?.();
     this._material?.dispose();
     this._geometry?.dispose();
+  }
+
+  private disposeObjectResources(object: I3DObject): void {
+    const anyObj = object as any;
+    if (anyObj?.geometry?.dispose) {
+      anyObj.geometry.dispose();
+    }
+    const material = anyObj?.material;
+    if (Array.isArray(material)) {
+      material.forEach((mat) => mat?.dispose?.());
+    } else if (material?.dispose) {
+      material.dispose();
+    }
+    if (typeof anyObj?.traverse === "function") {
+      anyObj.traverse((child: any) => {
+        if (child?.geometry?.dispose) {
+          child.geometry.dispose();
+        }
+        const childMat = child?.material;
+        if (Array.isArray(childMat)) {
+          childMat.forEach((mat: any) => mat?.dispose?.());
+        } else if (childMat?.dispose) {
+          childMat.dispose();
+        }
+      });
+    }
   }
 }

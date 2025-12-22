@@ -152,6 +152,9 @@ interface String3DOptions {
     hideHTML?: boolean;
     container?: string | HTMLElement;
     zIndex?: number;
+    modelLoaderType?: string;
+    modelLoader?: I3DModelLoader;
+    modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
 }
 declare class String3D extends StringModule {
     private static provider;
@@ -164,11 +167,16 @@ declare class String3D extends StringModule {
     private isLoading;
     private options;
     static setProvider(provider: I3DEngineProvider): void;
-    constructor(context: StringContext, options?: String3DOptions);
+    constructor(context: StringContext);
     canConnect(object: StringObject): boolean;
     initializeObject(globalId: number, object: StringObject, element: HTMLElement, attributes: Record<string, any>): void;
     onResize(): void;
     onInit(): void;
+    onSettingsChange(): void;
+    private buildOptionsFromSettings;
+    private getSettingValue;
+    private resolveModelLoader;
+    private resolveModelLoaderFactory;
     private createOrGetContainer;
     private applyContainerStyles;
     onObjectConnected(object: StringObject): void;
@@ -220,7 +228,11 @@ declare class String3DObject {
     private _children;
     private engine;
     get children(): String3DObject[];
-    constructor(id: string, type: string, object: I3DObject, engine: I3DEngine);
+    constructor(id: string, type: string, object: I3DObject, engine: I3DEngine, options?: {
+        material?: I3DMaterial;
+        geometry?: I3DGeometry;
+        texture?: any;
+    });
     get object(): I3DObject;
     get material(): I3DMaterial | undefined;
     get originalSize(): I3DVector3;
@@ -239,19 +251,28 @@ declare class String3DObject {
     set metalness(value: number);
     set roughness(value: number);
     set texture(texture: any);
+    set material(material: I3DMaterial | undefined);
+    set geometry(geometry: I3DGeometry | undefined);
     updateBoundingBox(): void;
     destroy(): void;
+    private disposeObjectResources;
 }
 
+interface String3DSceneOptions {
+    modelLoader?: I3DModelLoader;
+    modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
+}
 declare class String3DScene {
     private _scene;
     private _objects;
     private _rootObjects;
     private _elementMap;
     private engine;
-    private _modelLoader;
+    private _modelLoader?;
+    private _modelLoaderFactory?;
+    private _modelLoaderCache;
     get rootObjects(): String3DObject[];
-    constructor(engine: I3DEngine, modelLoader?: any);
+    constructor(engine: I3DEngine, options?: String3DSceneOptions);
     getScene(): I3DScene;
     getObject(id: string): String3DObject | undefined;
     hasObject(id: string): boolean;
@@ -264,8 +285,15 @@ declare class String3DScene {
     private createPlane;
     private createCylinder;
     private createModel;
+    private resolveModelLoader;
+    private centerObject;
+    private getBoxCenter;
     private createMaterialFromObject;
+    private createMaterialFromElement;
     private loadTexture;
+    private parseFlipY;
+    private shouldOverrideModelMaterial;
+    private applyModelTextureRemap;
     destroy(): void;
 }
 

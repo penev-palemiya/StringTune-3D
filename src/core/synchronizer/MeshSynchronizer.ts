@@ -41,6 +41,36 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
         scaleZ = uniformSize * cssScaleZ * parentScale;
         break;
       }
+      case "model": {
+        const bbox = object.getOriginalBoundingBox();
+        const size = bbox.getSize(ctx.engine.createVector3());
+        const fitMode = (el.getAttribute("string-3d-model-fit") || "contain")
+          .toLowerCase()
+          .trim();
+        const modelScaleAttr = parseFloat(
+          el.getAttribute("string-3d-model-scale") || "1"
+        );
+        const modelScale = Number.isFinite(modelScaleAttr) ? modelScaleAttr : 1;
+
+        if (size.x > 0 && size.y > 0) {
+          const scaleToWidth = targetWidth / size.x;
+          const scaleToHeight = targetHeight / size.y;
+          const uniformScale =
+            fitMode === "cover"
+              ? Math.max(scaleToWidth, scaleToHeight)
+              : Math.min(scaleToWidth, scaleToHeight);
+
+          scaleX = uniformScale * modelScale * parentScale;
+          scaleY = uniformScale * modelScale * parentScale;
+          scaleZ = uniformScale * modelScale * cssScaleZ * parentScale;
+        } else {
+          const fallbackSize = Math.min(targetWidth, targetHeight);
+          scaleX = fallbackSize * modelScale * parentScale;
+          scaleY = fallbackSize * modelScale * parentScale;
+          scaleZ = fallbackSize * modelScale * cssScaleZ * parentScale;
+        }
+        break;
+      }
       case "cylinder": {
         const cylRadius = targetWidth;
         scaleX = cylRadius * parentScale;

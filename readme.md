@@ -4,7 +4,7 @@
 
 **StringTune-3D** is a powerful 3D graphics module for the StringTune ecosystem. It provides seamless integration of 3D objects with HTML elements using a simple attribute-based approach. StringTune-3D works exclusively within the StringTune framework and enables automatic synchronization between DOM elements and 3D objects rendered via Three.js.
 
-> ⚠️ **Important**: StringTune-3D is a module for StringTune and requires the base `@fiddle-digital/string-tune` package to function.
+> **Important**: StringTune-3D is a module for StringTune and requires the base `@fiddle-digital/string-tune` package to function.
 
 ### Key Features
 
@@ -47,17 +47,22 @@ npm install three
 import { StringTune } from "@fiddle-digital/string-tune";
 import { String3D, ThreeJSProvider } from "string-tune-3d";
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 ```
 
 ### 2. Initialize StringTune with 3D Support
 
 ```typescript
-// Set the 3D provider (Three.js)
-String3D.setProvider(new ThreeJSProvider(THREE));
+// Set the 3D provider (Three.js + model loaders)
+String3D.setProvider(
+  new ThreeJSProvider(THREE, {
+    gltf: GLTFLoader,
+  })
+);
 
 // Get StringTune instance and register the 3D module
 const stringTune = StringTune.getInstance();
-stringTune.use(String3D);
+stringTune.use(String3D, { modelLoaderType: "gltf" });
 
 // Start StringTune
 stringTune.start(60); // 60 FPS
@@ -119,16 +124,40 @@ stringTune.start(60); // 60 FPS
 
 - `string="3d"` - Enables 3D for the element
 - `string-3d="<type>"` - Type of 3D object: `box`, `sphere`, `plane`, `ambientLight`, `directionalLight`, etc.
+- `string-3d="model"` - Loads a model (e.g. glTF)
 
 ### Material & Appearance
 
-- `string-3d-material="<type>[<color>]"` - Material type: `basic`, `standard`, `phong`
+- `string-3d-material="<type>[<color>]"` - Material type: `basic`, `standard`
 - `string-3d-color="<color>"` - Object or light color
 - `string-3d-opacity="<number>"` - Opacity (0-1)
+- `string-3d-metalness="<number>"` - Metalness (standard only)
+- `string-3d-roughness="<number>"` - Roughness (standard only)
 
 ### Lighting
 
 - `string-3d-intensity="<number>"` - Light intensity
+
+### Models
+
+- `string-3d-model="<url>"` - Path to model (e.g. `.gltf`, `.glb`)
+- `string-3d-model-loader="<type>"` - Loader override per element (e.g. `gltf`)
+- `string-3d-model-scale="<number>"` - Uniform scale (default `1`)
+- `string-3d-model-center="true|false"` - Center model at origin (default `false`)
+- `string-3d-model-fit="contain|cover"` - Fit model into element bounds (default `contain`)
+- `string-3d-model-texture-base="<url>"` - Base path for model texture URLs
+- `string-3d-model-textures='{"old.png":"/new.png"}'` - Remap model texture URLs
+> Note: Model materials are only overridden when you specify material or map attributes.
+
+### Textures & Maps
+
+- `string-3d-map="<url>"` - Base color map
+- `string-3d-normalMap="<url>"` - Normal map
+- `string-3d-roughnessMap="<url>"` - Roughness map
+- `string-3d-metalnessMap="<url>"` - Metalness map
+- `string-3d-aoMap="<url>"` - Ambient occlusion map
+- `string-3d-texture-flipY="true|false"` - Flip Y for all maps (default `true`)
+- `string-3d-colorSpace="srgb|linear"` - Color space for base color map
 
 ## License
 

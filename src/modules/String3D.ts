@@ -7,13 +7,16 @@ import { String3DRenderer } from "../core/String3DRenderer";
 import { String3DScene } from "../core/String3DScene";
 import { String3DSynchronizer } from "../core/synchronizer/String3DSynchronizer";
 import { I3DEngineProvider } from "../core/abstractions/I3DEngineProvider";
-import { I3DEngine } from "../core/abstractions/I3DEngine";
+import { I3DEngine, I3DModelLoader } from "../core/abstractions/I3DEngine";
 import { frameDOM } from "@fiddle-digital/string-tune";
 
 export interface String3DOptions {
   hideHTML?: boolean;
   container?: string | HTMLElement;
   zIndex?: number;
+  modelLoaderType?: string;
+  modelLoader?: I3DModelLoader;
+  modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
 }
 
 export class String3D extends StringModule {
@@ -32,14 +35,10 @@ export class String3D extends StringModule {
     String3D.provider = provider;
   }
 
-  constructor(context: StringContext, options: String3DOptions = {}) {
+  constructor(context: StringContext) {
     super(context);
     this.htmlKey = "3d";
-    this.options = {
-      hideHTML: options.hideHTML ?? false,
-      container: options.container,
-      zIndex: options.zIndex ?? 1,
-    };
+    this.options = this.buildOptionsFromSettings();
 
     this.attributesToMap = [
       ...this.attributesToMap,
@@ -54,6 +53,14 @@ export class String3D extends StringModule {
       { key: "3d-segments", type: "number", fallback: 32 },
       { key: "3d-segments-width", type: "number", fallback: 32 },
       { key: "3d-segments-height", type: "number", fallback: 32 },
+      { key: "3d-model-loader", type: "string", fallback: "" },
+      { key: "3d-model-scale", type: "number", fallback: 1 },
+      { key: "3d-model-center", type: "boolean", fallback: false },
+      { key: "3d-model-fit", type: "string", fallback: "contain" },
+      { key: "3d-metalness", type: "number", fallback: 0 },
+      { key: "3d-roughness", type: "number", fallback: 1 },
+      { key: "3d-texture-flipY", type: "boolean", fallback: true },
+      { key: "3d-colorSpace", type: "string", fallback: "" },
     ];
   }
 
@@ -102,6 +109,7 @@ export class String3D extends StringModule {
   }
 
   override onInit(): void {
+    this.options = this.buildOptionsFromSettings();
     if (!String3D.provider) {
       console.error("[String3D] No provider set. Call String3D.setProvider() before use.");
       return;
@@ -118,7 +126,12 @@ export class String3D extends StringModule {
     this.camera.setPosition(0, 0, 1000);
     this.camera.resize(this.renderer.width, this.renderer.height);
 
-    this.scene = new String3DScene(this.engine);
+    const modelLoader = this.resolveModelLoader();
+    const modelLoaderFactory = this.resolveModelLoaderFactory();
+    this.scene = new String3DScene(this.engine, {
+      modelLoader,
+      modelLoaderFactory,
+    });
     this.scene.getScene().add(this.camera.camera);
 
     this.synchronizer = new String3DSynchronizer(
@@ -129,6 +142,57 @@ export class String3D extends StringModule {
     );
 
     console.info(`[String3D] Initialized with: ${String3D.provider.getName()}`);
+  }
+
+  override onSettingsChange(): void {
+    this.options = this.buildOptionsFromSettings();
+  }
+
+  private buildOptionsFromSettings(): String3DOptions {
+    return {
+      hideHTML: this.getSettingValue("hideHTML", false),
+      container: this.getSettingValue("container", undefined),
+      zIndex: this.getSettingValue("zIndex", 1),
+      modelLoaderType: this.getSettingValue("modelLoaderType", undefined),
+      modelLoader: this.getSettingValue("modelLoader", undefined),
+      modelLoaderFactory: this.getSettingValue("modelLoaderFactory", undefined),
+    };
+  }
+
+  private getSettingValue<T>(key: string, fallback: T): T {
+    if (!this.settings || !(key in this.settings)) return fallback;
+    return this.settings[key] as T;
+  }
+
+  private resolveModelLoader(): I3DModelLoader | undefined {
+    if (!this.engine) return undefined;
+    if (this.options.modelLoader) return this.options.modelLoader;
+    if (this.options.modelLoaderFactory) return undefined;
+    if (this.options.modelLoaderType) {
+      try {
+        return this.engine.createModelLoader(this.options.modelLoaderType);
+      } catch (error) {
+        console.warn("[String3D] Failed to create model loader:", error);
+      }
+    }
+    return undefined;
+  }
+
+  private resolveModelLoaderFactory():
+    | ((engine: I3DEngine, type?: string) => I3DModelLoader)
+    | undefined {
+    if (!this.engine) return undefined;
+    if (this.options.modelLoaderFactory) return this.options.modelLoaderFactory;
+    if (this.options.modelLoaderType) {
+      return (engine: I3DEngine, type?: string) => {
+        const loaderType = type || this.options.modelLoaderType;
+        if (!loaderType) {
+          throw new Error("[String3D] Model loader type not provided");
+        }
+        return engine.createModelLoader(loaderType);
+      };
+    }
+    return undefined;
   }
 
   private createOrGetContainer(): HTMLElement {

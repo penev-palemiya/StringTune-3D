@@ -1,6 +1,18 @@
-import { I3DEngine, I3DScene, I3DLight, I3DMaterial } from "./abstractions/I3DEngine";
+import {
+  I3DEngine,
+  I3DScene,
+  I3DLight,
+  I3DMaterial,
+  I3DModelLoader,
+  I3DVector3,
+} from "./abstractions/I3DEngine";
 import { String3DObject } from "./String3DObject";
 import { StringObject } from "@fiddle-digital/string-tune";
+
+export interface String3DSceneOptions {
+  modelLoader?: I3DModelLoader;
+  modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
+}
 
 export class String3DScene {
   private _scene: I3DScene;
@@ -8,15 +20,18 @@ export class String3DScene {
   private _rootObjects: String3DObject[] = [];
   private _elementMap: Map<string, HTMLElement> = new Map();
   private engine: I3DEngine;
-  private _modelLoader: any;
+  private _modelLoader?: I3DModelLoader;
+  private _modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
+  private _modelLoaderCache: Map<string, I3DModelLoader> = new Map();
 
   public get rootObjects(): String3DObject[] {
     return this._rootObjects;
   }
 
-  constructor(engine: I3DEngine, modelLoader?: any) {
+  constructor(engine: I3DEngine, options: String3DSceneOptions = {}) {
     this.engine = engine;
-    this._modelLoader = modelLoader;
+    this._modelLoader = options.modelLoader;
+    this._modelLoaderFactory = options.modelLoaderFactory;
     this._scene = engine.createScene();
   }
 
@@ -131,7 +146,10 @@ export class String3DScene {
     const geometry = this.engine.createBoxGeometry(1, 1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
-    const obj = new String3DObject(object.id, "box", mesh, this.engine);
+    const obj = new String3DObject(object.id, "box", mesh, this.engine, {
+      geometry,
+      material,
+    });
     onAdd(obj);
     return obj;
   }
@@ -142,7 +160,10 @@ export class String3DScene {
     const geometry = this.engine.createSphereGeometry(0.5, widthSegments, heightSegments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
-    const obj = new String3DObject(object.id, "sphere", mesh, this.engine);
+    const obj = new String3DObject(object.id, "sphere", mesh, this.engine, {
+      geometry,
+      material,
+    });
     onAdd(obj);
     return obj;
   }
@@ -151,7 +172,10 @@ export class String3DScene {
     const geometry = this.engine.createPlaneGeometry(1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
-    const obj = new String3DObject(object.id, "plane", mesh, this.engine);
+    const obj = new String3DObject(object.id, "plane", mesh, this.engine, {
+      geometry,
+      material,
+    });
     onAdd(obj);
     return obj;
   }
@@ -164,33 +188,53 @@ export class String3DScene {
     const geometry = this.engine.createCylinderGeometry(0.5, 0.5, 1, segments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
-    const obj = new String3DObject(object.id, "cylinder", mesh, this.engine);
+    const obj = new String3DObject(object.id, "cylinder", mesh, this.engine, {
+      geometry,
+      material,
+    });
     onAdd(obj);
     return obj;
   }
 
   private createModel(object: StringObject, onAdd: (obj: String3DObject) => void): void {
-    if (!this._modelLoader) {
+    const modelPath = object.getProperty<string>("3d-model");
+    if (!modelPath) return;
+
+    const loaderType = object.getProperty<string>("3d-model-loader") || undefined;
+    const loader = this.resolveModelLoader(loaderType);
+    if (!loader) {
       console.warn("[String3D] Model loader not configured");
       return;
     }
 
-    const modelPath = object.getProperty<string>("3d-model");
-    if (!modelPath) return;
+    const element = object.htmlElement;
+    if (element) {
+      this.applyModelTextureRemap(loader, element);
+    }
+    const shouldCenter = object.getProperty<boolean>("3d-model-center") ?? false;
 
-    const material = this.createMaterialFromObject(object);
-
-    const loader = this._modelLoader;
     loader.load(
       modelPath,
       (gltf: any) => {
-        const gltfScene = gltf.scene;
-        gltfScene.traverse((child: any) => {
-          if (child.isMesh) {
-            child.material = material;
+        const root = gltf?.scene || gltf?.object || gltf;
+        if (!root) {
+          console.warn("[String3D] Model loader returned empty result");
+          return;
+        }
+        if (element && this.shouldOverrideModelMaterial(element)) {
+          const material = this.createMaterialFromElement(element, object);
+          if (typeof root.traverse === "function") {
+            root.traverse((child: any) => {
+              if (child.isMesh) {
+                child.material = material;
+              }
+            });
           }
-        });
-        const obj = new String3DObject(object.id, "model", gltfScene, this.engine);
+        }
+        if (shouldCenter) {
+          this.centerObject(root);
+        }
+        const obj = new String3DObject(object.id, "model", root, this.engine);
         onAdd(obj);
       },
       (xhr: any) => {
@@ -202,37 +246,180 @@ export class String3DScene {
     );
   }
 
+  private resolveModelLoader(type?: string): I3DModelLoader | undefined {
+    if (type) {
+      if (this._modelLoaderCache.has(type)) {
+        return this._modelLoaderCache.get(type);
+      }
+      if (!this._modelLoaderFactory) {
+        console.warn(`[String3D] No model loader factory for type "${type}"`);
+        return undefined;
+      }
+      const loader = this._modelLoaderFactory(this.engine, type);
+      this._modelLoaderCache.set(type, loader);
+      return loader;
+    }
+
+    if (this._modelLoader) {
+      return this._modelLoader;
+    }
+
+    if (this._modelLoaderFactory) {
+      return this._modelLoaderFactory(this.engine);
+    }
+
+    return undefined;
+  }
+
+  private centerObject(object: any): void {
+    if (!object) return;
+    const bbox = this.engine.computeBoundingBoxRecursively(object);
+    const center = this.getBoxCenter(bbox);
+    if (object.position?.set) {
+      object.position.set(-center.x, -center.y, -center.z);
+    }
+    object.updateMatrixWorld(true);
+  }
+
+  private getBoxCenter(box: any): I3DVector3 {
+    const center = this.engine.createVector3();
+    center.x = (box.min.x + box.max.x) / 2;
+    center.y = (box.min.y + box.max.y) / 2;
+    center.z = (box.min.z + box.max.z) / 2;
+    return center;
+  }
+
   private createMaterialFromObject(object: StringObject): I3DMaterial {
-    const attr = object.getProperty<string>("3d-material") || "basic[#ffffff]";
-    const [type, colorRaw] = attr.split(/\[|\]/);
+    return this.createMaterialFromElement(object.htmlElement, object);
+  }
+
+  private createMaterialFromElement(
+    element: HTMLElement | null,
+    object?: StringObject
+  ): I3DMaterial {
+    const attr = object?.getProperty<string>("3d-material") || "basic[#ffffff]";
+    let [type, colorRaw] = attr.split(/\[|\]/);
     const color = colorRaw || "#ffffff";
-    const opacity = object.getProperty<number>("3d-opacity") ?? 1;
+    const opacity = object?.getProperty<number>("3d-opacity") ?? 1;
+    const metalness = object?.getProperty<number>("3d-metalness");
+    const roughness = object?.getProperty<number>("3d-roughness");
     const params: any = {
       color,
       transparent: opacity < 1,
       opacity: opacity,
     };
 
-    const el = (object as any).el as HTMLElement;
-    const mapSrc = el?.getAttribute("string-3d-map");
-    const normalMapSrc = el?.getAttribute("string-3d-normalMap");
-    const roughnessMapSrc = el?.getAttribute("string-3d-roughnessMap");
-    const aoMapSrc = el?.getAttribute("string-3d-aoMap");
+    const mapSrc = element?.getAttribute("string-3d-map");
+    const normalMapSrc = element?.getAttribute("string-3d-normalMap");
+    const roughnessMapSrc = element?.getAttribute("string-3d-roughnessMap");
+    const metalnessMapSrc = element?.getAttribute("string-3d-metalnessMap");
+    const aoMapSrc = element?.getAttribute("string-3d-aoMap");
+    const flipY = this.parseFlipY(object, element);
+    const colorSpace =
+      object?.getProperty<string>("3d-colorSpace") ||
+      element?.getAttribute("string-3d-colorSpace") ||
+      "";
+
+    const hasMaps = !!(
+      mapSrc ||
+      normalMapSrc ||
+      roughnessMapSrc ||
+      metalnessMapSrc ||
+      aoMapSrc
+    );
+    if (type !== "standard" && hasMaps) {
+      type = "standard";
+    }
 
     if (type === "standard") {
-      if (mapSrc) params.map = this.loadTexture(mapSrc);
-      if (normalMapSrc) params.normalMap = this.loadTexture(normalMapSrc);
-      if (roughnessMapSrc) params.roughnessMap = this.loadTexture(roughnessMapSrc);
-      if (aoMapSrc) params.aoMap = this.loadTexture(aoMapSrc);
+      if (mapSrc) {
+        params.map = this.loadTexture(mapSrc, { flipY, colorSpace });
+      }
+      if (normalMapSrc) params.normalMap = this.loadTexture(normalMapSrc, { flipY });
+      if (roughnessMapSrc) params.roughnessMap = this.loadTexture(roughnessMapSrc, { flipY });
+      if (metalnessMapSrc) params.metalnessMap = this.loadTexture(metalnessMapSrc, { flipY });
+      if (aoMapSrc) params.aoMap = this.loadTexture(aoMapSrc, { flipY });
+      if (typeof metalness === "number") params.metalness = metalness;
+      if (typeof roughness === "number") params.roughness = roughness;
       return this.engine.createMeshStandardMaterial(params);
     }
 
     return this.engine.createMeshBasicMaterial(params);
   }
 
-  private loadTexture(src: string): any {
+  private loadTexture(
+    src: string,
+    options: { flipY?: boolean; colorSpace?: string } = {}
+  ): any {
     const textureLoader = this.engine.createTextureLoader();
-    return textureLoader.load(src);
+    const texture = textureLoader.load(src);
+    if (typeof options.flipY === "boolean") {
+      texture.flipY = options.flipY;
+    }
+    const colorSpace = (options.colorSpace || "").toLowerCase().trim();
+    if (colorSpace && "colorSpace" in texture) {
+      texture.colorSpace = colorSpace === "srgb" ? "srgb" : "linear";
+    }
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  private parseFlipY(object?: StringObject, element?: HTMLElement | null): boolean | undefined {
+    const value =
+      object?.getProperty<boolean>("3d-texture-flipY") ??
+      element?.getAttribute("string-3d-texture-flipY");
+    if (value === undefined || value === null || value === "") return undefined;
+    if (typeof value === "boolean") return value;
+    const normalized = String(value).toLowerCase().trim();
+    if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+    if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+    return undefined;
+  }
+
+  private shouldOverrideModelMaterial(element: HTMLElement): boolean {
+    const attrs = [
+      "string-3d-material",
+      "string-3d-color",
+      "string-3d-opacity",
+      "string-3d-map",
+      "string-3d-normalMap",
+      "string-3d-roughnessMap",
+      "string-3d-metalnessMap",
+      "string-3d-aoMap",
+      "string-3d-metalness",
+      "string-3d-roughness",
+    ];
+    return attrs.some((attr) => element.hasAttribute(attr));
+  }
+
+  private applyModelTextureRemap(loader: any, element: HTMLElement): void {
+    const baseRaw = (element.getAttribute("string-3d-model-texture-base") || "").trim();
+    const base = baseRaw ? baseRaw.replace(/\/?$/, "/") : "";
+    const mappingRaw = element.getAttribute("string-3d-model-textures");
+    let mapping: Record<string, string> | null = null;
+
+    if (mappingRaw) {
+      try {
+        mapping = JSON.parse(mappingRaw);
+      } catch (error) {
+        console.warn("[String3D] Invalid model texture mapping JSON:", error);
+      }
+    }
+
+    const manager = loader?.manager;
+    if (!manager || typeof manager.setURLModifier !== "function") {
+      if (mapping || base) {
+        console.warn("[String3D] Model loader does not support URL remap.");
+      }
+      return;
+    }
+
+    manager.setURLModifier((url: string) => {
+      const mapped = mapping && url in mapping ? mapping[url] : url;
+      if (!base) return mapped;
+      if (/^(blob:|data:|https?:|file:|\/)/i.test(mapped)) return mapped;
+      return base + mapped.replace(/^\.?\//, "");
+    });
   }
 
   public destroy(): void {
