@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StringTune 3D</title>
+
+</head>
+
+<body>
+  <main class="page">
+    <div class="shape-wrapper" string="progress" string-enter-vp="top">
+      <div class="shape" string="3d|impulse" string-3d="model" string-3d-model="./damaged_helmet.glb"
+        string-3d-model-fit="contain"></div>
+      <div string="3d" string-3d="ambientLight" string-3d-color="#ffffff" string-3d-intensity="3.5"></div>
+      <div string="3d" string-3d="directionalLight" string-3d-color="#ffffff" string-3d-intensity="3"></div>
+    </div>
+  </main>
+
+  <script src="https://unpkg.com/@fiddle-digital/string-tune@1.1.45/dist/index.js"></script>
+  <script src="https://unpkg.com/string-tune-3d@0.0.4/dist/index.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+
+    const { String3D, ThreeJSProvider } = window.StringTune3D;
+    const { StringTune: StringTuneCore, StringImpulse, StringProgress } = window.StringTune;
+
+    String3D.setProvider(
+      new ThreeJSProvider(THREE, {
+        gltf: GLTFLoader,
+      })
+    );
+
+    const stringTune = StringTuneCore.getInstance();
+    stringTune.use(StringImpulse);
+    stringTune.use(StringProgress);
+    stringTune.use(String3D, {
+      modelLoaderFactory: () => new GLTFLoader(),
+    });
+    stringTune.start(60);
+  </script>
+
+  <style>
+    @property --progress {
+      syntax: '<number>';
+      inherits: true;
+      initial-value: 0;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #0f1115;
+      color: #e5e7eb;
+      font-family: system-ui, sans-serif;
+    }
+
+    .page {
+      display: flex;
+      height: 200lvh;
+    }
+
+    .shape-wrapper {
+      position: sticky;
+      top: 0;
+      height: 100lvh;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .shape {
+      position: relative;
+      width: 200px;
+      height: 200px;
+
+      --translate-x: calc(var(--progress) * 360 + var(--push-x, 0));
+      --translate-y: var(--push-y);
+      --rotate-y: calc(var(--progress) * 310);
+      --rotate-z: var(--push-rotation);
+      --scale: calc(1 + var(--progress) * 1);
+
+      transform-style: preserve-3d;
+      transform: translateX(calc(var(--translate-x) * 1px)) translateY(calc(var(--translate-y) * 1px)) translateZ(calc(var(--translate-z) * 1px)) rotateX(calc(var(--rotate-x, 0) * 1deg)) rotateY(calc(var(--rotate-y, 0) * 1deg)) rotateZ(calc(var(--rotate-z, 0) * 1deg)) scale(var(--scale, 1));
+
+    }
+
+
+    .shape::before {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 1rem;
+      padding: 3px;
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(118, 75, 162, 0.5));
+      -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0.5;
+    }
+  </style>
+</body>
+
+</html>
