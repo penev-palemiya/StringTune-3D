@@ -147,7 +147,7 @@ stringTune.start(60); // 60 FPS
 - `string-3d-model-fit="contain|cover"` - Fit model into element bounds (default `contain`)
 - `string-3d-model-texture-base="<url>"` - Base path for model texture URLs
 - `string-3d-model-textures='{"old.png":"/new.png"}'` - Remap model texture URLs
-> Note: Model materials are only overridden when you specify material or map attributes.
+  > Note: Model materials are only overridden when you specify material or map attributes.
 
 ### Textures & Maps
 
@@ -165,6 +165,6 @@ MIT © [penev.tech](https://penev.tech)
 
 ## Links
 
-- [GitHub Repository](https://github.com/penev-tech/stringtune-3d)
-- [Issues](https://github.com/penev-tech/stringtune-3d/issues)
+- [GitHub Repository](https://github.com/penev-palemiya/StringTune-3D)
+- [Issues](https://github.com/penev-palemiya/StringTune-3D/issues)
 - [StringTune Main Library](https://www.npmjs.com/package/@fiddle-digital/string-tune)
