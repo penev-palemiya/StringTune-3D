@@ -24,6 +24,8 @@ export class String3DSynchronizer {
     this.strategies.set("pointLight", new LightSynchronizer());
     this.strategies.set("ambientLight", new LightSynchronizer());
     this.strategies.set("directionalLight", new LightSynchronizer());
+    this.strategies.set("spotLight", new LightSynchronizer());
+    this.strategies.set("hemisphereLight", new LightSynchronizer());
   }
 
   public syncElement(el: HTMLElement, object: String3DObject, parentData: any): any {

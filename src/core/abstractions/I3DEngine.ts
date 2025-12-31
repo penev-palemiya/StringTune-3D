@@ -66,6 +66,8 @@ export interface I3DObject {
 export interface I3DMesh extends I3DObject {
   geometry: I3DGeometry;
   material: I3DMaterial | I3DMaterial[];
+  castShadow: boolean;
+  receiveShadow: boolean;
 }
 
 export interface I3DGeometry {
@@ -83,6 +85,13 @@ export interface I3DMaterial {
 export interface I3DLight extends I3DObject {
   color: any;
   intensity: number;
+  castShadow?: boolean;
+  shadow?: any;
+  target?: I3DObject;
+  distance?: number;
+  decay?: number;
+  angle?: number;
+  penumbra?: number;
 }
 
 export interface I3DCamera extends I3DObject {
@@ -116,6 +125,8 @@ export interface I3DRenderer {
   setPixelRatio(ratio: number): void;
   render(scene: I3DScene, camera: I3DCamera): void;
   dispose(): void;
+  outputEncoding: any;
+  shadowMap: { enabled: boolean; type: any };
 }
 
 export interface I3DTextureLoader {
@@ -180,6 +191,19 @@ export interface I3DEngine {
     intensity?: number,
     distance?: number,
     decay?: number
+  ): I3DLight;
+  createSpotLight(
+    color?: string | number,
+    intensity?: number,
+    distance?: number,
+    angle?: number,
+    penumbra?: number,
+    decay?: number
+  ): I3DLight;
+  createHemisphereLight(
+    skyColor?: string | number,
+    groundColor?: string | number,
+    intensity?: number
   ): I3DLight;
   createAmbientLight(color?: string | number, intensity?: number): I3DLight;
   createDirectionalLight(color?: string | number, intensity?: number): I3DLight;

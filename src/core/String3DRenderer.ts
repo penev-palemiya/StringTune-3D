@@ -23,6 +23,10 @@ export class String3DRenderer {
     });
     this._renderer.setPixelRatio(window.devicePixelRatio);
     this._renderer.setSize(width, height);
+
+    if (this._renderer.shadowMap) {
+      this._renderer.shadowMap.enabled = true;
+    }
   }
 
   public attach(): void {

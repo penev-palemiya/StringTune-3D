@@ -123,6 +123,25 @@ export class ThreeJSEngine implements I3DEngine {
     return new this.THREE.PointLight(color, intensity, distance, decay);
   }
 
+  createSpotLight(
+    color?: string | number,
+    intensity = 1,
+    distance = 0,
+    angle = Math.PI / 3,
+    penumbra = 0,
+    decay = 1
+  ): I3DLight {
+    return new this.THREE.SpotLight(color, intensity, distance, angle, penumbra, decay);
+  }
+
+  createHemisphereLight(
+    skyColor?: string | number,
+    groundColor?: string | number,
+    intensity = 1
+  ): I3DLight {
+    return new this.THREE.HemisphereLight(skyColor, groundColor, intensity);
+  }
+
   createAmbientLight(color?: string | number, intensity = 1): I3DLight {
     return new this.THREE.AmbientLight(color, intensity);
   }

@@ -120,4 +120,12 @@ export class String3DCamera {
   public getMode(): CameraMode {
     return this.mode;
   }
+
+  public getPerspectiveFov(): number {
+    return this.perspectiveFov;
+  }
+
+  public getPositionZ(): number {
+    return this._position.z;
+  }
 }

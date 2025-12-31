@@ -93,6 +93,12 @@ export class String3DScene {
       case "directionalLight":
         this.createLight(object, "directional", onAdd);
         break;
+      case "spotLight":
+        this.createLight(object, "spot", onAdd);
+        break;
+      case "hemisphereLight":
+        this.createLight(object, "hemisphere", onAdd);
+        break;
       case "model":
         this.createModel(object, onAdd);
         break;
@@ -120,7 +126,7 @@ export class String3DScene {
 
   private createLight(
     object: StringObject,
-    kind: "point" | "ambient" | "directional",
+    kind: "point" | "ambient" | "directional" | "spot" | "hemisphere",
     onAdd: (obj: String3DObject) => void
   ): String3DObject {
     const color = object.getProperty<string>("3d-color") || "#ffffff";
@@ -133,8 +139,27 @@ export class String3DScene {
       light = this.engine.createPointLight(color, intensity, distance, decay);
     } else if (kind === "directional") {
       light = this.engine.createDirectionalLight(color, intensity);
+    } else if (kind === "spot") {
+      const distance = object.getProperty<number>("3d-distance") ?? 0;
+      const angle = object.getProperty<number>("3d-angle") ?? Math.PI / 3;
+      const penumbra = object.getProperty<number>("3d-penumbra") ?? 0;
+      const decay = object.getProperty<number>("3d-decay") ?? 1;
+      light = this.engine.createSpotLight(color, intensity, distance, angle, penumbra, decay);
+    } else if (kind === "hemisphere") {
+      const groundColor = object.getProperty<string>("3d-ground-color") || "#ffffff";
+      light = this.engine.createHemisphereLight(color, groundColor, intensity);
     } else {
       light = this.engine.createAmbientLight(color, intensity);
+    }
+
+    const castShadow = object.getProperty<boolean>("3d-cast-shadow") ?? false;
+    if (castShadow && light.shadow) {
+      light.castShadow = true;
+      const bias = object.getProperty<number>("3d-shadow-bias") ?? 0;
+      const mapSize = object.getProperty<number>("3d-shadow-map-size") ?? 512;
+      light.shadow.bias = bias;
+      light.shadow.mapSize.width = mapSize;
+      light.shadow.mapSize.height = mapSize;
     }
 
     const obj = new String3DObject(object.id, kind + "Light", light, this.engine);
@@ -142,10 +167,18 @@ export class String3DScene {
     return obj;
   }
 
+  private applyShadowProps(object: StringObject, mesh: any): void {
+    const castShadow = object.getProperty<boolean>("3d-cast-shadow") ?? false;
+    const receiveShadow = object.getProperty<boolean>("3d-receive-shadow") ?? false;
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = receiveShadow;
+  }
+
   private createBox(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
     const geometry = this.engine.createBoxGeometry(1, 1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
     const obj = new String3DObject(object.id, "box", mesh, this.engine, {
       geometry,
       material,
@@ -160,6 +193,7 @@ export class String3DScene {
     const geometry = this.engine.createSphereGeometry(0.5, widthSegments, heightSegments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
     const obj = new String3DObject(object.id, "sphere", mesh, this.engine, {
       geometry,
       material,
@@ -172,6 +206,7 @@ export class String3DScene {
     const geometry = this.engine.createPlaneGeometry(1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
     const obj = new String3DObject(object.id, "plane", mesh, this.engine, {
       geometry,
       material,
@@ -188,6 +223,7 @@ export class String3DScene {
     const geometry = this.engine.createCylinderGeometry(0.5, 0.5, 1, segments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
     const obj = new String3DObject(object.id, "cylinder", mesh, this.engine, {
       geometry,
       material,
@@ -221,16 +257,23 @@ export class String3DScene {
           console.warn("[String3D] Model loader returned empty result");
           return;
         }
-        if (element && this.shouldOverrideModelMaterial(element)) {
-          const material = this.createMaterialFromElement(element, object);
-          if (typeof root.traverse === "function") {
-            root.traverse((child: any) => {
-              if (child.isMesh) {
-                child.material = material;
+
+        const overrideMaterial =
+          element && this.shouldOverrideModelMaterial(element)
+            ? this.createMaterialFromElement(element, object)
+            : null;
+
+        if (typeof root.traverse === "function") {
+          root.traverse((child: any) => {
+            if (child.isMesh) {
+              if (overrideMaterial) {
+                child.material = overrideMaterial;
               }
-            });
-          }
+              this.applyShadowProps(object, child);
+            }
+          });
         }
+
         if (shouldCenter) {
           this.centerObject(root);
         }
@@ -320,13 +363,7 @@ export class String3DScene {
       element?.getAttribute("string-3d-colorSpace") ||
       "";
 
-    const hasMaps = !!(
-      mapSrc ||
-      normalMapSrc ||
-      roughnessMapSrc ||
-      metalnessMapSrc ||
-      aoMapSrc
-    );
+    const hasMaps = !!(mapSrc || normalMapSrc || roughnessMapSrc || metalnessMapSrc || aoMapSrc);
     if (type !== "standard" && hasMaps) {
       type = "standard";
     }
@@ -347,10 +384,7 @@ export class String3DScene {
     return this.engine.createMeshBasicMaterial(params);
   }
 
-  private loadTexture(
-    src: string,
-    options: { flipY?: boolean; colorSpace?: string } = {}
-  ): any {
+  private loadTexture(src: string, options: { flipY?: boolean; colorSpace?: string } = {}): any {
     const textureLoader = this.engine.createTextureLoader();
     const texture = textureLoader.load(src);
     if (typeof options.flipY === "boolean") {

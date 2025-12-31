@@ -61,6 +61,8 @@ interface I3DObject {
 interface I3DMesh extends I3DObject {
     geometry: I3DGeometry;
     material: I3DMaterial | I3DMaterial[];
+    castShadow: boolean;
+    receiveShadow: boolean;
 }
 interface I3DGeometry {
     dispose(): void;
@@ -75,6 +77,13 @@ interface I3DMaterial {
 interface I3DLight extends I3DObject {
     color: any;
     intensity: number;
+    castShadow?: boolean;
+    shadow?: any;
+    target?: I3DObject;
+    distance?: number;
+    decay?: number;
+    angle?: number;
+    penumbra?: number;
 }
 interface I3DCamera extends I3DObject {
     aspect: number;
@@ -103,6 +112,11 @@ interface I3DRenderer {
     setPixelRatio(ratio: number): void;
     render(scene: I3DScene, camera: I3DCamera): void;
     dispose(): void;
+    outputEncoding: any;
+    shadowMap: {
+        enabled: boolean;
+        type: any;
+    };
 }
 interface I3DTextureLoader {
     load(url: string, onLoad?: (texture: any) => void): any;
@@ -134,6 +148,8 @@ interface I3DEngine {
     createMeshBasicMaterial(params?: any): I3DMaterial;
     createMeshStandardMaterial(params?: any): I3DMaterial;
     createPointLight(color?: string | number, intensity?: number, distance?: number, decay?: number): I3DLight;
+    createSpotLight(color?: string | number, intensity?: number, distance?: number, angle?: number, penumbra?: number, decay?: number): I3DLight;
+    createHemisphereLight(skyColor?: string | number, groundColor?: string | number, intensity?: number): I3DLight;
     createAmbientLight(color?: string | number, intensity?: number): I3DLight;
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
@@ -155,6 +171,9 @@ interface String3DOptions {
     modelLoaderType?: string;
     modelLoader?: I3DModelLoader;
     modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
+    useDirtySync?: boolean;
+    useTransformWorker?: boolean;
+    transformWorkerWasmUrl?: string;
 }
 declare class String3D extends StringModule {
     private static provider;
@@ -166,6 +185,19 @@ declare class String3D extends StringModule {
     private canvasContainer;
     private isLoading;
     private options;
+    private useDirtySync;
+    private dirtyElements;
+    private observedElements;
+    private resizeObserver;
+    private mutationObserver;
+    private lastSyncData;
+    private transformWorker;
+    private workerHasResult;
+    private workerObjectMap;
+    private domVersion;
+    private lastSubmittedVersion;
+    private scrollTicking;
+    private onScrollBound;
     static setProvider(provider: I3DEngineProvider): void;
     constructor(context: StringContext);
     canConnect(object: StringObject): boolean;
@@ -183,6 +215,20 @@ declare class String3D extends StringModule {
     onFrame(data: StringData): void;
     private syncRecursive;
     private injectCSS;
+    private registerTypedProperties;
+    private setupObservers;
+    private setupScrollListeners;
+    private removeScrollListeners;
+    private handleScroll;
+    private observeElement;
+    private observeSceneElements;
+    private observeRecursive;
+    private markDirty;
+    private markAllDirty;
+    private readNumberStyle;
+    private buildWorkerCameraData;
+    private collectWorkerInputs;
+    private applyWorkerResults;
     destroy(): void;
 }
 
@@ -210,6 +256,8 @@ declare class String3DCamera {
     getScaleAtZ(z: number, viewportHeight: number): number;
     clearScaleCache(): void;
     getMode(): CameraMode;
+    getPerspectiveFov(): number;
+    getPositionZ(): number;
 }
 
 declare class String3DObject {
@@ -280,6 +328,7 @@ declare class String3DScene {
     createFromElement(object: StringObject): void;
     private createGroup;
     private createLight;
+    private applyShadowProps;
     private createBox;
     private createSphere;
     private createPlane;
@@ -351,6 +400,8 @@ declare class ThreeJSEngine implements I3DEngine {
     createMeshBasicMaterial(params?: any): I3DMaterial;
     createMeshStandardMaterial(params?: any): I3DMaterial;
     createPointLight(color?: string | number, intensity?: number, distance?: number, decay?: number): I3DLight;
+    createSpotLight(color?: string | number, intensity?: number, distance?: number, angle?: number, penumbra?: number, decay?: number): I3DLight;
+    createHemisphereLight(skyColor?: string | number, groundColor?: string | number, intensity?: number): I3DLight;
     createAmbientLight(color?: string | number, intensity?: number): I3DLight;
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
