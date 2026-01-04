@@ -14,6 +14,7 @@ import {
   I3DMesh,
   I3DGeometry,
   I3DMaterial,
+  I3DRenderTarget,
   I3DLight,
   I3DTextureLoader,
   I3DModelLoader,
@@ -119,6 +120,9 @@ export class ThreeJSEngine implements I3DEngine {
     return new this.THREE.MeshStandardMaterial(params);
   }
 
+  createShaderMaterial(params?: any): I3DMaterial {
+    return new this.THREE.ShaderMaterial(params);
+  }
   createPointLight(color?: string | number, intensity = 1, distance = 0, decay = 2): I3DLight {
     return new this.THREE.PointLight(color, intensity, distance, decay);
   }
@@ -160,6 +164,17 @@ export class ThreeJSEngine implements I3DEngine {
       throw new Error(`[ThreeJSEngine] Model loader "${type}" not registered`);
     }
     return new LoaderClass();
+  }
+
+  createRenderTarget(width: number, height: number, options: any = {}): I3DRenderTarget {
+    const defaults = {
+      minFilter: this.THREE.LinearFilter,
+      magFilter: this.THREE.LinearFilter,
+      format: this.THREE.RGBAFormat,
+      depthBuffer: true,
+      stencilBuffer: false,
+    };
+    return new this.THREE.WebGLRenderTarget(width, height, { ...defaults, ...options });
   }
 
   degToRad(degrees: number): number {

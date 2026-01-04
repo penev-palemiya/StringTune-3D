@@ -24,6 +24,8 @@ export class String3DObject {
   private _bbox: I3DBox3;
   public el: any;
   private _children: String3DObject[] = [];
+  private _flatObjectsCache: I3DObject[] | null = null;
+  private _subtreeCache: I3DObject[] | null = null;
   private engine: I3DEngine;
 
   public get children(): String3DObject[] {
@@ -69,6 +71,8 @@ export class String3DObject {
   public addChild(child: String3DObject): void {
     this._children.push(child);
     this.object.add(child.object);
+    this.invalidateFlatCache();
+    this.invalidateSubtreeCache();
   }
 
   public getWorldMatrix(): I3DMatrix4 {
@@ -179,6 +183,43 @@ export class String3DObject {
     this._texture?.dispose?.();
     this._material?.dispose();
     this._geometry?.dispose();
+    this._subtreeCache = null;
+  }
+
+  public getFlatObjects(): I3DObject[] {
+    if (this._flatObjectsCache) return this._flatObjectsCache;
+    const result: I3DObject[] = [];
+    const walk = (obj: String3DObject): void => {
+      result.push(obj.object);
+      obj.children.forEach((child) => walk(child));
+    };
+    walk(this);
+    this._flatObjectsCache = result;
+    return result;
+  }
+
+  public getSubtreeObjects(): I3DObject[] {
+    if (this._subtreeCache) return this._subtreeCache;
+    const result: I3DObject[] = [];
+    const anyObj = this._object as any;
+    result.push(this._object);
+    if (typeof anyObj.traverse === "function") {
+      anyObj.traverse((child: any) => {
+        if (child && child !== this._object) {
+          result.push(child as I3DObject);
+        }
+      });
+    }
+    this._subtreeCache = result;
+    return result;
+  }
+
+  private invalidateFlatCache(): void {
+    this._flatObjectsCache = null;
+  }
+
+  private invalidateSubtreeCache(): void {
+    this._subtreeCache = null;
   }
 
   private disposeObjectResources(object: I3DObject): void {

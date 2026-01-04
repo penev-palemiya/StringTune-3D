@@ -1,6 +1,6 @@
 {
   "name": "string-tune-3d",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "StringTune-3D is a powerful 3D graphics adapter library that provides a unified interface for working with different 3D engines like Three.js. Part of the StringTune ecosystem, it enables seamless integration and synchronization of 3D objects, scenes, cameras, and lights across various rendering engines.",
   "keywords": [
     "3d",

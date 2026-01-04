@@ -43,6 +43,16 @@ export class String3DScene {
     return this._objects.get(id);
   }
 
+  public getAllObjects(): String3DObject[] {
+    const result: String3DObject[] = [];
+    const walk = (obj: String3DObject): void => {
+      result.push(obj);
+      obj.children.forEach((child) => walk(child));
+    };
+    this._rootObjects.forEach((obj) => walk(obj));
+    return result;
+  }
+
   public hasObject(id: string): boolean {
     return this._objects.has(id);
   }

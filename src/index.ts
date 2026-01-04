@@ -13,6 +13,7 @@ export type {
   I3DMesh,
   I3DGeometry,
   I3DMaterial,
+  I3DRenderTarget,
   I3DLight,
   I3DCamera,
   I3DPerspectiveCamera,
@@ -31,5 +32,9 @@ export { String3DRenderer } from "./core/String3DRenderer";
 export { String3DScene } from "./core/String3DScene";
 export { String3DObject } from "./core/String3DObject";
 export { String3DSynchronizer } from "./core/synchronizer/String3DSynchronizer";
+export {
+  String3DCustomFilterRegistry,
+  type String3DCustomFilterDefinition,
+} from "./core/filters/String3DCustomFilter";
 
 export { ThreeJSProvider, ThreeJSEngine } from "./adapters/ThreeJSProvider";

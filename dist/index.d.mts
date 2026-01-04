@@ -74,6 +74,13 @@ interface I3DMaterial {
     opacity?: number;
     transparent?: boolean;
 }
+interface I3DRenderTarget {
+    texture: any;
+    width: number;
+    height: number;
+    setSize(width: number, height: number): void;
+    dispose(): void;
+}
 interface I3DLight extends I3DObject {
     color: any;
     intensity: number;
@@ -117,6 +124,9 @@ interface I3DRenderer {
         enabled: boolean;
         type: any;
     };
+    setRenderTarget?(target: I3DRenderTarget | null): void;
+    getRenderTarget?(): I3DRenderTarget | null;
+    clear?(color?: boolean, depth?: boolean, stencil?: boolean): void;
 }
 interface I3DTextureLoader {
     load(url: string, onLoad?: (texture: any) => void): any;
@@ -147,6 +157,7 @@ interface I3DEngine {
     createCylinderGeometry(radiusTop: number, radiusBottom: number, height: number, segments?: number): I3DGeometry;
     createMeshBasicMaterial(params?: any): I3DMaterial;
     createMeshStandardMaterial(params?: any): I3DMaterial;
+    createShaderMaterial?(params?: any): I3DMaterial;
     createPointLight(color?: string | number, intensity?: number, distance?: number, decay?: number): I3DLight;
     createSpotLight(color?: string | number, intensity?: number, distance?: number, angle?: number, penumbra?: number, decay?: number): I3DLight;
     createHemisphereLight(skyColor?: string | number, groundColor?: string | number, intensity?: number): I3DLight;
@@ -154,6 +165,7 @@ interface I3DEngine {
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
     createModelLoader(type: string): I3DModelLoader;
+    createRenderTarget?(width: number, height: number, options?: any): I3DRenderTarget;
     degToRad(degrees: number): number;
     radToDeg(radians: number): number;
     computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
@@ -198,6 +210,8 @@ declare class String3D extends StringModule {
     private lastSubmittedVersion;
     private scrollTicking;
     private onScrollBound;
+    private filterStates;
+    private filterWarnings;
     static setProvider(provider: I3DEngineProvider): void;
     constructor(context: StringContext);
     canConnect(object: StringObject): boolean;
@@ -226,6 +240,27 @@ declare class String3D extends StringModule {
     private markDirty;
     private markAllDirty;
     private readNumberStyle;
+    private readFilterRaw;
+    private parseFilterChain;
+    private warnFilterIssues;
+    private readFilterChain;
+    private collectFilterTargets;
+    private stringifyFilterChain;
+    private getFilterTransition;
+    private splitTransitionList;
+    private findTransitionIndex;
+    private parseTime;
+    private parseTransitionShorthand;
+    private parseEasing;
+    private cubicBezier;
+    private canInterpolate;
+    private makeZeroChain;
+    private sampleTransition;
+    private getCurrentChain;
+    private interpolateChain;
+    private interpolateEffect;
+    private isNumeric;
+    private isZeroChain;
     private buildWorkerCameraData;
     private collectWorkerInputs;
     private applyWorkerResults;
@@ -274,6 +309,8 @@ declare class String3DObject {
     private _bbox;
     el: any;
     private _children;
+    private _flatObjectsCache;
+    private _subtreeCache;
     private engine;
     get children(): String3DObject[];
     constructor(id: string, type: string, object: I3DObject, engine: I3DEngine, options?: {
@@ -303,6 +340,10 @@ declare class String3DObject {
     set geometry(geometry: I3DGeometry | undefined);
     updateBoundingBox(): void;
     destroy(): void;
+    getFlatObjects(): I3DObject[];
+    getSubtreeObjects(): I3DObject[];
+    private invalidateFlatCache;
+    private invalidateSubtreeCache;
     private disposeObjectResources;
 }
 
@@ -323,6 +364,7 @@ declare class String3DScene {
     constructor(engine: I3DEngine, options?: String3DSceneOptions);
     getScene(): I3DScene;
     getObject(id: string): String3DObject | undefined;
+    getAllObjects(): String3DObject[];
     hasObject(id: string): boolean;
     deleteObject(id: string): boolean;
     createFromElement(object: StringObject): void;
@@ -346,20 +388,87 @@ declare class String3DScene {
     destroy(): void;
 }
 
+type String3DFilterEffect = {
+    type: "blur";
+    amount: number;
+} | {
+    type: "pixel";
+    size: number;
+} | {
+    type: "bloom";
+    intensity: number;
+    threshold: number;
+} | {
+    type: "brightness";
+    amount: number;
+} | {
+    type: "contrast";
+    amount: number;
+} | {
+    type: "saturate";
+    amount: number;
+} | {
+    type: "grayscale";
+    amount: number;
+} | {
+    type: "sepia";
+    amount: number;
+} | {
+    type: "invert";
+    amount: number;
+} | {
+    type: "hue-rotate";
+    angle: number;
+} | {
+    type: "custom";
+    name: string;
+    uniforms: Record<string, any>;
+};
+type String3DFilterChain = String3DFilterEffect[];
+type String3DFilterTarget = {
+    object: String3DObject;
+    effects: String3DFilterChain;
+    effectsKey: string;
+    dirty: boolean;
+};
+
 declare class String3DRenderer {
     private _container;
     private _renderer;
     private _width;
     private _height;
     private engine;
+    private filterPipeline;
+    private filterCache;
+    private frameId;
+    private lastFrameTime;
+    private avgFrameMs;
+    private qualityScale;
+    private lastQualityChange;
+    private filterLayer;
     constructor(container: HTMLElement, engine: I3DEngine);
     attach(): void;
-    render(scene: String3DScene, camera: String3DCamera): void;
+    render(scene: String3DScene, camera: String3DCamera, filterTargets?: String3DFilterTarget[]): void;
     resize(camera: String3DCamera): void;
     get width(): number;
     get height(): number;
     get renderer(): I3DRenderer;
     destroy(): void;
+    private ensureFilterPipeline;
+    private canCreateFilterPipeline;
+    private collectSubtreeObjects;
+    private setVisible;
+    private getFilterCenter;
+    private injectEffectContext;
+    private updateQuality;
+    private invalidateFilterCache;
+    private evictCache;
+    private supportsLayers;
+    private hasLayers;
+    private applyLayerMask;
+    private restoreLayerMask;
+    private setCameraLayer;
+    private restoreCameraLayer;
 }
 
 declare class String3DSynchronizer {
@@ -371,6 +480,20 @@ declare class String3DSynchronizer {
     constructor(camera: String3DCamera, viewportWidth: number, viewportHeight: number, engine: I3DEngine);
     syncElement(el: HTMLElement, object: String3DObject, parentData: any): any;
     updateViewportSize(width: number, height: number): void;
+}
+
+type String3DCustomFilterDefinition = {
+    name: string;
+    fragmentShader: string;
+    uniforms?: Record<string, any>;
+    parse?: (args: string) => Record<string, any> | null;
+};
+declare class String3DCustomFilterRegistry {
+    private static filters;
+    static register(definition: String3DCustomFilterDefinition): void;
+    static get(name: string): String3DCustomFilterDefinition | undefined;
+    static has(name: string): boolean;
+    static list(): String3DCustomFilterDefinition[];
 }
 
 declare class ThreeJSEngine implements I3DEngine {
@@ -399,6 +522,7 @@ declare class ThreeJSEngine implements I3DEngine {
     createCylinderGeometry(radiusTop: number, radiusBottom: number, height: number, segments?: number): I3DGeometry;
     createMeshBasicMaterial(params?: any): I3DMaterial;
     createMeshStandardMaterial(params?: any): I3DMaterial;
+    createShaderMaterial(params?: any): I3DMaterial;
     createPointLight(color?: string | number, intensity?: number, distance?: number, decay?: number): I3DLight;
     createSpotLight(color?: string | number, intensity?: number, distance?: number, angle?: number, penumbra?: number, decay?: number): I3DLight;
     createHemisphereLight(skyColor?: string | number, groundColor?: string | number, intensity?: number): I3DLight;
@@ -406,6 +530,7 @@ declare class ThreeJSEngine implements I3DEngine {
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
     createModelLoader(type: string): I3DModelLoader;
+    createRenderTarget(width: number, height: number, options?: any): I3DRenderTarget;
     degToRad(degrees: number): number;
     radToDeg(radians: number): number;
     computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
@@ -417,4 +542,4 @@ declare class ThreeJSProvider implements I3DEngineProvider {
     getName(): string;
 }
 
-export { type CameraMode, type I3DBox3, type I3DCamera, type I3DEngine, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DPerspectiveCamera, type I3DQuaternion, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, String3D, String3DCamera, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSProvider };
+export { type CameraMode, type I3DBox3, type I3DCamera, type I3DEngine, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DPerspectiveCamera, type I3DQuaternion, type I3DRenderTarget, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, String3D, String3DCamera, type String3DCustomFilterDefinition, String3DCustomFilterRegistry, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSProvider };

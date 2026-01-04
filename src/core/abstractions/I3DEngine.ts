@@ -82,6 +82,14 @@ export interface I3DMaterial {
   transparent?: boolean;
 }
 
+export interface I3DRenderTarget {
+  texture: any;
+  width: number;
+  height: number;
+  setSize(width: number, height: number): void;
+  dispose(): void;
+}
+
 export interface I3DLight extends I3DObject {
   color: any;
   intensity: number;
@@ -127,6 +135,9 @@ export interface I3DRenderer {
   dispose(): void;
   outputEncoding: any;
   shadowMap: { enabled: boolean; type: any };
+  setRenderTarget?(target: I3DRenderTarget | null): void;
+  getRenderTarget?(): I3DRenderTarget | null;
+  clear?(color?: boolean, depth?: boolean, stencil?: boolean): void;
 }
 
 export interface I3DTextureLoader {
@@ -186,6 +197,7 @@ export interface I3DEngine {
   ): I3DGeometry;
   createMeshBasicMaterial(params?: any): I3DMaterial;
   createMeshStandardMaterial(params?: any): I3DMaterial;
+  createShaderMaterial?(params?: any): I3DMaterial;
   createPointLight(
     color?: string | number,
     intensity?: number,
@@ -209,6 +221,7 @@ export interface I3DEngine {
   createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
   createTextureLoader(): I3DTextureLoader;
   createModelLoader(type: string): I3DModelLoader;
+  createRenderTarget?(width: number, height: number, options?: any): I3DRenderTarget;
   degToRad(degrees: number): number;
   radToDeg(radians: number): number;
   computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
