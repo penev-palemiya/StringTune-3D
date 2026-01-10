@@ -6,4 +6,8 @@ export interface SyncContext {
   viewportWidth: number;
   viewportHeight: number;
   engine: I3DEngine;
+  dirtySet?: Set<HTMLElement> | null;
+  forceSync?: boolean;
+  styleReadIntervalMs?: number;
+  layoutReadIntervalMs?: number;
 }

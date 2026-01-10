@@ -8,6 +8,8 @@ import {
 } from "./abstractions/I3DEngine";
 import { String3DObject } from "./String3DObject";
 import { StringObject } from "@fiddle-digital/string-tune";
+import { readBooleanStyle, readNumberStyle, readStringStyle } from "../modules/string3d/styleUtils";
+import { String3DCustomMaterialRegistry, IMaterialInstance } from "./materials";
 
 export interface String3DSceneOptions {
   modelLoader?: I3DModelLoader;
@@ -19,6 +21,7 @@ export class String3DScene {
   private _objects: Map<string, String3DObject> = new Map();
   private _rootObjects: String3DObject[] = [];
   private _elementMap: Map<string, HTMLElement> = new Map();
+  private _materialInstances: Map<string, IMaterialInstance> = new Map();
   private engine: I3DEngine;
   private _modelLoader?: I3DModelLoader;
   private _modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
@@ -62,6 +65,8 @@ export class String3DScene {
     if (obj) {
       this._scene.remove(obj.object);
       this._objects.delete(id);
+      this._elementMap.delete(id);
+      this._rootObjects = this._rootObjects.filter((root) => root !== obj);
       obj.destroy();
       return true;
     }
@@ -124,6 +129,12 @@ export class String3DScene {
       case "cylinder":
         this.createCylinder(object, onAdd);
         break;
+      case "particles":
+        this.createParticles(object, onAdd);
+        break;
+      case "text":
+        this.createText(object, onAdd);
+        break;
     }
   }
 
@@ -139,34 +150,39 @@ export class String3DScene {
     kind: "point" | "ambient" | "directional" | "spot" | "hemisphere",
     onAdd: (obj: String3DObject) => void
   ): String3DObject {
-    const color = object.getProperty<string>("3d-color") || "#ffffff";
-    const intensity = object.getProperty<number>("3d-intensity") ?? 1;
+    const element = object.htmlElement;
+    const colorRaw = element ? readStringStyle(element, "--light-color", "#ffffff") : "#ffffff";
+    const color = colorRaw && colorRaw !== "none" ? colorRaw : "#ffffff";
+    const intensity = element ? readNumberStyle(element, "--light-intensity", 1) : 1;
 
     let light: I3DLight;
     if (kind === "point") {
-      const distance = object.getProperty<number>("3d-distance") ?? 1000;
-      const decay = object.getProperty<number>("3d-decay") ?? 0;
+      const distance = element ? readNumberStyle(element, "--light-distance", 1000) : 1000;
+      const decay = element ? readNumberStyle(element, "--light-decay", 0) : 0;
       light = this.engine.createPointLight(color, intensity, distance, decay);
     } else if (kind === "directional") {
       light = this.engine.createDirectionalLight(color, intensity);
     } else if (kind === "spot") {
-      const distance = object.getProperty<number>("3d-distance") ?? 0;
-      const angle = object.getProperty<number>("3d-angle") ?? Math.PI / 3;
-      const penumbra = object.getProperty<number>("3d-penumbra") ?? 0;
-      const decay = object.getProperty<number>("3d-decay") ?? 1;
+      const distance = element ? readNumberStyle(element, "--light-distance", 0) : 0;
+      const angle = element ? readNumberStyle(element, "--light-angle", Math.PI / 3) : Math.PI / 3;
+      const penumbra = element ? readNumberStyle(element, "--light-penumbra", 0) : 0;
+      const decay = element ? readNumberStyle(element, "--light-decay", 1) : 1;
       light = this.engine.createSpotLight(color, intensity, distance, angle, penumbra, decay);
     } else if (kind === "hemisphere") {
-      const groundColor = object.getProperty<string>("3d-ground-color") || "#ffffff";
+      const groundRaw = element
+        ? readStringStyle(element, "--light-ground-color", "#ffffff")
+        : "#ffffff";
+      const groundColor = groundRaw && groundRaw !== "none" ? groundRaw : "#ffffff";
       light = this.engine.createHemisphereLight(color, groundColor, intensity);
     } else {
       light = this.engine.createAmbientLight(color, intensity);
     }
 
-    const castShadow = object.getProperty<boolean>("3d-cast-shadow") ?? false;
+    const castShadow = element ? readBooleanStyle(element, "--shadow-cast", false) : false;
     if (castShadow && light.shadow) {
       light.castShadow = true;
-      const bias = object.getProperty<number>("3d-shadow-bias") ?? 0;
-      const mapSize = object.getProperty<number>("3d-shadow-map-size") ?? 512;
+      const bias = element ? readNumberStyle(element, "--shadow-bias", 0) : 0;
+      const mapSize = element ? readNumberStyle(element, "--shadow-map-size", 512) : 512;
       light.shadow.bias = bias;
       light.shadow.mapSize.width = mapSize;
       light.shadow.mapSize.height = mapSize;
@@ -178,8 +194,9 @@ export class String3DScene {
   }
 
   private applyShadowProps(object: StringObject, mesh: any): void {
-    const castShadow = object.getProperty<boolean>("3d-cast-shadow") ?? false;
-    const receiveShadow = object.getProperty<boolean>("3d-receive-shadow") ?? false;
+    const element = object.htmlElement;
+    const castShadow = element ? readBooleanStyle(element, "--shadow-cast", false) : false;
+    const receiveShadow = element ? readBooleanStyle(element, "--shadow-receive", false) : false;
     mesh.castShadow = castShadow;
     mesh.receiveShadow = receiveShadow;
   }
@@ -198,8 +215,9 @@ export class String3DScene {
   }
 
   private createSphere(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
-    const widthSegments = object.getProperty<number>("3d-segments-width") ?? 32;
-    const heightSegments = object.getProperty<number>("3d-segments-height") ?? 32;
+    const quality = this.getGeometryQuality(object.htmlElement);
+    const widthSegments = Math.max(3, Math.round(32 * quality));
+    const heightSegments = Math.max(2, Math.round(32 * quality));
     const geometry = this.engine.createSphereGeometry(0.5, widthSegments, heightSegments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
@@ -229,7 +247,8 @@ export class String3DScene {
     object: StringObject,
     onAdd: (obj: String3DObject) => void
   ): String3DObject {
-    const segments = object.getProperty<number>("3d-segments") ?? 32;
+    const quality = this.getGeometryQuality(object.htmlElement);
+    const segments = Math.max(3, Math.round(32 * quality));
     const geometry = this.engine.createCylinderGeometry(0.5, 0.5, 1, segments);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
@@ -299,6 +318,84 @@ export class String3DScene {
     );
   }
 
+  private createParticles(object: StringObject, onAdd: (obj: String3DObject) => void): void {
+    if (!this.engine.createParticleSystem) {
+      console.warn("[String3D] Particle system not supported by engine.");
+      return;
+    }
+
+    const element = object.htmlElement;
+    const config: import("./abstractions/I3DEngine").ParticleSystemConfig = {
+      mode: "emitter",
+      count: 300,
+      size: 2,
+      color: "#ffffff",
+      opacity: 1,
+      spread: 120,
+      seed: 1,
+      emitRate: 30,
+      emitBurst: 0,
+      particleLife: 2.5,
+      particleSpeed: 40,
+      particleDirection: [0, 1, 0] as [number, number, number],
+      particleGravity: [0, -30, 0] as [number, number, number],
+      particleDrag: 0.1,
+        particleSizeVariation: 0.6,
+        particleColorVariation: 0.2,
+        particleShape: "sphere",
+        particleModelUrl: "",
+        particleModelLoader: "",
+        particleModelNode: "",
+        instanceShape: "sphere",
+        instanceModelUrl: "",
+        instanceModelLoader: "",
+        instanceModelNode: "",
+      instanceScale: 1,
+        instanceScaleVariation: 0.5,
+        instanceRotationSpeed: 0.4,
+        instanceJitter: 0.2,
+        instanceFlow: 0.3,
+        instanceDisperse: 0,
+        instanceDisperseScatter: 0,
+        instanceDisperseScatterX: 0,
+        instanceDisperseScatterY: 0,
+        instanceDisperseScatterZ: 0,
+      };
+
+    const system = this.engine.createParticleSystem(config);
+    const obj = new String3DObject(object.id, "particles", system, this.engine);
+    onAdd(obj);
+  }
+
+  private createText(object: StringObject, onAdd: (obj: String3DObject) => void): void {
+    if (!this.engine.createTextGeometry) {
+      console.warn("[String3D] Text geometry not supported by engine.");
+      return;
+    }
+
+    const geometry = this.engine.createBoxGeometry(1, 1, 1);
+    const material = this.createMaterialFromObject(object);
+    const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
+
+    const group = this.engine.createGroup();
+    (group as any).__textMesh = mesh;
+    group.add(mesh);
+
+    const obj = new String3DObject(object.id, "text", group, this.engine, {
+      geometry,
+      material,
+    });
+    onAdd(obj);
+  }
+
+  private getGeometryQuality(element?: HTMLElement | null): number {
+    if (!element) return 1;
+    const quality = readNumberStyle(element, "--geometry-quality", 1);
+    if (!Number.isFinite(quality) || quality <= 0) return 1;
+    return quality;
+  }
+
   private resolveModelLoader(type?: string): I3DModelLoader | undefined {
     if (type) {
       if (this._modelLoaderCache.has(type)) {
@@ -350,48 +447,118 @@ export class String3DScene {
     element: HTMLElement | null,
     object?: StringObject
   ): I3DMaterial {
-    const attr = object?.getProperty<string>("3d-material") || "basic[#ffffff]";
-    let [type, colorRaw] = attr.split(/\[|\]/);
-    const color = colorRaw || "#ffffff";
-    const opacity = object?.getProperty<number>("3d-opacity") ?? 1;
-    const metalness = object?.getProperty<number>("3d-metalness");
-    const roughness = object?.getProperty<number>("3d-roughness");
+    const style = element ? getComputedStyle(element) : null;
+    const getCSS = (prop: string) => (style ? style.getPropertyValue(prop).trim() : "");
+
+    const resolve = <T>(cssProp: string, parser: (v: string) => T, defaultValue: T): T => {
+      const cssVal = getCSS(cssProp);
+      if (cssVal && cssVal !== "none" && cssVal !== "") return parser(cssVal);
+      return defaultValue;
+    };
+
+    const parseNumber = (v: string) => parseFloat(v);
+    const parseColor = (v: string) => v;
+    const parseUrl = (v: string) => {
+      const match = v.match(/url\(['"]?(.*?)['"]?\)/);
+      return match ? match[1] : v;
+    };
+
+    const type = resolve("--material-type", (v) => v.split("[")[0] || "basic", "basic");
+
+    const customMaterial = this.tryCreateCustomMaterial(type, element, style, object);
+    if (customMaterial) {
+      return customMaterial;
+    }
+
+    const color = resolve("--material-color", parseColor, "#ffffff");
+
+    const opacity = resolve("--opacity", parseNumber, 1);
+    const metalness = resolve("--material-metalness", parseNumber, 0);
+    const roughness = resolve("--material-roughness", parseNumber, 1);
+    const emissive = resolve("--material-emissive", parseColor, "#000000");
+
     const params: any = {
       color,
       transparent: opacity < 1,
       opacity: opacity,
     };
 
-    const mapSrc = element?.getAttribute("string-3d-map");
-    const normalMapSrc = element?.getAttribute("string-3d-normalMap");
-    const roughnessMapSrc = element?.getAttribute("string-3d-roughnessMap");
-    const metalnessMapSrc = element?.getAttribute("string-3d-metalnessMap");
-    const aoMapSrc = element?.getAttribute("string-3d-aoMap");
-    const flipY = this.parseFlipY(object, element);
-    const colorSpace =
-      object?.getProperty<string>("3d-colorSpace") ||
-      element?.getAttribute("string-3d-colorSpace") ||
-      "";
+    const mapSrc = resolve("--texture-map", parseUrl, "");
+    const normalMapSrc = resolve("--texture-normal", parseUrl, "");
+    const roughnessMapSrc = resolve("--texture-roughness", parseUrl, "");
+    const metalnessMapSrc = resolve("--texture-metalness", parseUrl, "");
+    const aoMapSrc = resolve("--texture-ao", parseUrl, "");
+
+    const flipY = this.parseFlipY(element);
+    const colorSpace = element ? readStringStyle(element, "--texture-color-space", "") : "";
 
     const hasMaps = !!(mapSrc || normalMapSrc || roughnessMapSrc || metalnessMapSrc || aoMapSrc);
-    if (type !== "standard" && hasMaps) {
-      type = "standard";
+    let finalType = type;
+    if (finalType !== "standard" && hasMaps) {
+      finalType = "standard";
     }
 
-    if (type === "standard") {
-      if (mapSrc) {
-        params.map = this.loadTexture(mapSrc, { flipY, colorSpace });
-      }
+    if (finalType === "standard") {
+      if (mapSrc) params.map = this.loadTexture(mapSrc, { flipY, colorSpace });
       if (normalMapSrc) params.normalMap = this.loadTexture(normalMapSrc, { flipY });
       if (roughnessMapSrc) params.roughnessMap = this.loadTexture(roughnessMapSrc, { flipY });
       if (metalnessMapSrc) params.metalnessMap = this.loadTexture(metalnessMapSrc, { flipY });
       if (aoMapSrc) params.aoMap = this.loadTexture(aoMapSrc, { flipY });
-      if (typeof metalness === "number") params.metalness = metalness;
-      if (typeof roughness === "number") params.roughness = roughness;
+
+      params.metalness = metalness;
+      params.roughness = roughness;
+      params.emissive = emissive;
+
       return this.engine.createMeshStandardMaterial(params);
     }
 
     return this.engine.createMeshBasicMaterial(params);
+  }
+
+  private tryCreateCustomMaterial(
+    type: string,
+    element: HTMLElement | null,
+    style: CSSStyleDeclaration | null,
+    object?: StringObject
+  ): I3DMaterial | null {
+    const definition = String3DCustomMaterialRegistry.get(type);
+    if (!definition) {
+      return null;
+    }
+
+    const factory = this.engine.getMaterialFactory?.();
+    if (!factory) {
+      console.warn(`[String3D] Material factory not available for custom material "${type}"`);
+      return null;
+    }
+    if (!factory.supports(definition)) {
+      console.warn(`[String3D] Material factory does not support "${type}".`);
+      return null;
+    }
+
+    let initialUniforms: Record<string, any> = {};
+    if (element && style) {
+      initialUniforms = factory.parseUniformsFromCSS(definition, element, style);
+    }
+
+    const instance = factory.create(definition, initialUniforms);
+
+    if (object) {
+      this._materialInstances.set(object.id, instance);
+    }
+
+    return instance.material;
+  }
+
+  public updateMaterialUniforms(objectId: string, uniforms: Record<string, any>): void {
+    const instance = this._materialInstances.get(objectId);
+    if (instance) {
+      instance.update(uniforms);
+    }
+  }
+
+  public getMaterialInstance(objectId: string): IMaterialInstance | undefined {
+    return this._materialInstances.get(objectId);
   }
 
   private loadTexture(src: string, options: { flipY?: boolean; colorSpace?: string } = {}): any {
@@ -408,10 +575,8 @@ export class String3DScene {
     return texture;
   }
 
-  private parseFlipY(object?: StringObject, element?: HTMLElement | null): boolean | undefined {
-    const value =
-      object?.getProperty<boolean>("3d-texture-flipY") ??
-      element?.getAttribute("string-3d-texture-flipY");
+  private parseFlipY(element?: HTMLElement | null): boolean | undefined {
+    const value = element ? readStringStyle(element, "--texture-flip-y", "") : "";
     if (value === undefined || value === null || value === "") return undefined;
     if (typeof value === "boolean") return value;
     const normalized = String(value).toLowerCase().trim();
@@ -421,19 +586,26 @@ export class String3DScene {
   }
 
   private shouldOverrideModelMaterial(element: HTMLElement): boolean {
-    const attrs = [
-      "string-3d-material",
-      "string-3d-color",
-      "string-3d-opacity",
-      "string-3d-map",
-      "string-3d-normalMap",
-      "string-3d-roughnessMap",
-      "string-3d-metalnessMap",
-      "string-3d-aoMap",
-      "string-3d-metalness",
-      "string-3d-roughness",
+    const style = getComputedStyle(element);
+    const hasStyle = (prop: string) => {
+      const val = style.getPropertyValue(prop);
+      return val && val !== "0" && val !== "none" && val !== "";
+    };
+
+    if (hasStyle("--material-color") || hasStyle("--texture-map")) return true;
+
+    const cssVars = [
+      "--material-type",
+      "--material-metalness",
+      "--material-roughness",
+      "--material-emissive",
+      "--opacity",
+      "--texture-normal",
+      "--texture-roughness",
+      "--texture-metalness",
+      "--texture-ao",
     ];
-    return attrs.some((attr) => element.hasAttribute(attr));
+    return cssVars.some((prop) => hasStyle(prop));
   }
 
   private applyModelTextureRemap(loader: any, element: HTMLElement): void {
@@ -467,6 +639,8 @@ export class String3DScene {
   }
 
   public destroy(): void {
+    this._materialInstances.forEach((instance) => instance.dispose());
+    this._materialInstances.clear();
     this._objects.forEach((obj) => obj.destroy());
     this._objects.clear();
     this._rootObjects = [];

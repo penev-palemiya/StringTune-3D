@@ -1,61 +1,69 @@
 import { String3DObject } from "../String3DObject";
 import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 import type { SyncContext } from "./SyncContext";
+import { StyleReader } from "../../modules/string3d/styleUtils";
+import { StyleBundleCache } from "./StyleBundleCache";
 
-type StyleMap = {
-  get?: (prop: string) => any;
+const DEG_TO_RAD = Math.PI / 180;
+
+type GroupStyleBundle = {
+  translateZ: number;
+  scale: number;
+  rotateX: number;
+  rotateY: number;
+  rotateZ: number;
 };
 
 export class GroupSynchronizer implements String3DObjectSyncStrategy {
+  private static styleCache = new StyleBundleCache<GroupStyleBundle>();
+
   sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any {
-    const rect = el.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
+    const cached = (el as any).__layoutCache;
+    const rect = cached ? cached.rect : el.getBoundingClientRect();
+    const bundle = this.readStyleBundle(el, ctx);
 
-    const styleMap = (el as any).computedStyleMap?.() as StyleMap | undefined;
-    let style: CSSStyleDeclaration | null = null;
-    const getStyle = () => {
-      if (!style) style = getComputedStyle(el);
-      return style;
-    };
+    const screenCenterX = rect.left + rect.width * 0.5;
+    const screenCenterY = rect.top + rect.height * 0.5;
 
-    const readNumberStyle = (prop: string, fallback: number): number => {
-      const mapValue = styleMap?.get?.(prop);
-      if (mapValue !== undefined) {
-        if (typeof mapValue === "number") return mapValue;
-        if (typeof mapValue === "string") {
-          const parsed = Number.parseFloat(mapValue);
-          if (!Number.isNaN(parsed)) return parsed;
-        }
-        if (mapValue && typeof mapValue === "object") {
-          const value = (mapValue as any).value;
-          if (typeof value === "number") return value;
-          if (typeof value === "string") {
-            const parsed = Number.parseFloat(value);
-            if (!Number.isNaN(parsed)) return parsed;
-          }
-        }
-      }
+    if (ctx.camera.getMode() === "orthographic") {
+      object.object.position.set(
+        screenCenterX - ctx.viewportWidth / 2,
+        -(screenCenterY - ctx.viewportHeight / 2),
+        bundle.translateZ
+      );
+    } else {
+      const frustum = ctx.camera.getFrustumSizeAt(bundle.translateZ);
+      const normalizedX = screenCenterX / ctx.viewportWidth;
+      const normalizedY = screenCenterY / ctx.viewportHeight;
+      object.object.position.set(
+        (normalizedX - 0.5) * frustum.width,
+        -(normalizedY - 0.5) * frustum.height,
+        bundle.translateZ
+      );
+    }
 
-      const raw = getStyle().getPropertyValue(prop);
-      const parsed = Number.parseFloat(raw);
-      return Number.isNaN(parsed) ? fallback : parsed;
-    };
+    object.object.scale.set(bundle.scale, bundle.scale, bundle.scale);
 
-    const translateZ = readNumberStyle("--translate-z", 0);
-    const position = ctx.camera.screenToWorld(centerX, centerY, translateZ);
-    object.position = position;
-
-    const scale = readNumberStyle("--scale", 1);
-    object.scale = ctx.engine.createVector3(scale, scale, scale);
-
-    const rotateX = -ctx.engine.degToRad(readNumberStyle("--rotate-x", 0));
-    const rotateY = ctx.engine.degToRad(readNumberStyle("--rotate-y", 0));
-    const rotateZ = -ctx.engine.degToRad(readNumberStyle("--rotate-z", 0));
-    object.rotation = ctx.engine.createEuler(rotateX, rotateY, rotateZ, "XYZ");
+    object.object.rotation.x = -bundle.rotateX * DEG_TO_RAD;
+    object.object.rotation.y = bundle.rotateY * DEG_TO_RAD;
+    object.object.rotation.z = -bundle.rotateZ * DEG_TO_RAD;
+    object.object.rotation.order = "XYZ";
 
     object.object.updateMatrixWorld(true);
 
-    return { scale };
+    return { scale: bundle.scale };
+  }
+
+  private readStyleBundle(el: HTMLElement, ctx: SyncContext): GroupStyleBundle {
+    return GroupSynchronizer.styleCache.get(el, ctx, (el) => {
+      const styles = new StyleReader(el);
+      return {
+        translateZ: styles.readNumber("--translate-z", 0),
+        scale: styles.readNumber("--scale", 1),
+        rotateX: styles.readNumber("--rotate-x", 0),
+        rotateY: styles.readNumber("--rotate-y", 0),
+        rotateZ: styles.readNumber("--rotate-z", 0),
+      };
+    });
   }
 }

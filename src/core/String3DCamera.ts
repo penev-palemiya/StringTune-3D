@@ -14,7 +14,7 @@ export class String3DCamera {
 
   constructor(
     engine: I3DEngine,
-    mode: CameraMode = "orthographic",
+    mode: CameraMode = "perspective",
     fov = 50,
     near = 0.1,
     far = 10000

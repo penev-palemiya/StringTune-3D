@@ -39,6 +39,10 @@ export class String3DRenderer {
       alpha: true,
       logarithmicDepthBuffer: true,
     });
+    const rendererAny = this._renderer as any;
+    if (typeof rendererAny.setClearColor === "function") {
+      rendererAny.setClearColor(0x000000, 0);
+    }
     this._renderer.setPixelRatio(window.devicePixelRatio);
     this._renderer.setSize(width, height);
 
@@ -127,7 +131,10 @@ export class String3DRenderer {
         return;
       }
 
-      const effects = this.injectEffectContext(target.object.el as HTMLElement | undefined, target.effects);
+      const effects = this.injectEffectContext(
+        target.object.el as HTMLElement | undefined,
+        target.effects
+      );
 
       const allowed = new Set<I3DObject>();
       this.collectSubtreeObjects(target.object, allowed);
@@ -278,7 +285,8 @@ export class String3DRenderer {
 
   private getFilterCenter(el: HTMLElement | undefined): [number, number] {
     if (!el || !this._width || !this._height) return [0.5, 0.5];
-    const rect = el.getBoundingClientRect();
+    const cached = (el as any).__layoutCache;
+    const rect = cached ? cached.rect : el.getBoundingClientRect();
     const cx = (rect.left + rect.width / 2) / this._width;
     const cy = 1 - (rect.top + rect.height / 2) / this._height;
     const clamp = (value: number) => Math.max(0, Math.min(1, value));

@@ -15,6 +15,9 @@ export type {
   I3DMaterial,
   I3DRenderTarget,
   I3DLight,
+  I3DParticleSystem,
+  ParticleSystemConfig,
+  ParticleMode,
   I3DCamera,
   I3DPerspectiveCamera,
   I3DOrthographicCamera,
@@ -37,4 +40,25 @@ export {
   type String3DCustomFilterDefinition,
 } from "./core/filters/String3DCustomFilter";
 
+export {
+  String3DCustomMaterialRegistry,
+  type String3DCustomMaterialDefinition,
+  type UniformType,
+  type UniformDefinition,
+  type ShaderInjection,
+  type ShaderInjectionPoint,
+  type MaterialBlendMode,
+  type MaterialSide,
+  type IMaterialInstance,
+  type IMaterialFactory,
+} from "./core/materials";
+export {
+  String3DFontRegistry,
+  type String3DFontEntry,
+  FontConverter,
+  type FontData,
+  type FontSource,
+} from "./core/text";
+
 export { ThreeJSProvider, ThreeJSEngine } from "./adapters/ThreeJSProvider";
+export { ThreeJSMaterialFactory } from "./adapters/ThreeJSMaterialFactory";

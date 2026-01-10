@@ -90,6 +90,55 @@ export interface I3DRenderTarget {
   dispose(): void;
 }
 
+export type ParticleMode = "emitter" | "instanced";
+
+export type ParticleSystemConfig = {
+  mode: ParticleMode;
+  count: number;
+  size: number;
+  color: string;
+  opacity: number;
+  spread: number;
+  seed: number;
+  emitRate: number;
+  emitBurst: number;
+  particleLife: number;
+  particleSpeed: number;
+  particleDirection: [number, number, number];
+  particleGravity: [number, number, number];
+  particleDrag: number;
+  particleSizeVariation: number;
+  particleColorVariation: number;
+  particleShape: "box" | "sphere" | "model";
+  particleModelUrl: string;
+  particleModelLoader: string;
+  particleModelNode: string;
+  instanceShape: "box" | "sphere" | "model";
+  instanceModelUrl: string;
+  instanceModelLoader: string;
+  instanceModelNode: string;
+  instanceScale: number;
+  instanceScaleVariation: number;
+  instanceRotationSpeed: number;
+  instanceJitter: number;
+  instanceFlow: number;
+  instanceDisperse: number;
+  instanceDisperseScatter: number;
+  instanceDisperseScatterX: number;
+  instanceDisperseScatterY: number;
+  instanceDisperseScatterZ: number;
+};
+
+export interface I3DParticleSystem extends I3DObject {
+  update?(dt: number): void;
+  setConfig?(config: ParticleSystemConfig): void;
+  setMaterial?(
+    material: I3DMaterial | null,
+    options?: { points?: boolean; meshes?: boolean }
+  ): void;
+  dispose?(): void;
+}
+
 export interface I3DLight extends I3DObject {
   color: any;
   intensity: number;
@@ -143,6 +192,21 @@ export interface I3DRenderer {
 export interface I3DTextureLoader {
   load(url: string, onLoad?: (texture: any) => void): any;
 }
+
+export type TextGeometryOptions = {
+  size: number;
+  height: number;
+  curveSegments: number;
+  bevelEnabled: boolean;
+  bevelThickness: number;
+  bevelSize: number;
+  bevelOffset: number;
+  bevelSegments: number;
+  lineHeight: number;
+  letterSpacing: number;
+  align: "left" | "center" | "right";
+  layout?: Array<{ char: string; x: number; y: number; scale?: number }>;
+};
 
 export interface I3DModelLoader {
   load(
@@ -222,6 +286,11 @@ export interface I3DEngine {
   createTextureLoader(): I3DTextureLoader;
   createModelLoader(type: string): I3DModelLoader;
   createRenderTarget?(width: number, height: number, options?: any): I3DRenderTarget;
+  getMaterialFactory?(): import("../materials").IMaterialFactory | null;
+  createParticleSystem?(config: ParticleSystemConfig): I3DParticleSystem;
+  loadFont?(url: string): Promise<any>;
+  createTextGeometry?(text: string, font: any, options: TextGeometryOptions): I3DGeometry | null;
+  simplifyGeometry?(geometry: I3DGeometry, quality: number): I3DGeometry | null;
   degToRad(degrees: number): number;
   radToDeg(radians: number): number;
   computeBoundingBoxRecursively(object: I3DObject): I3DBox3;

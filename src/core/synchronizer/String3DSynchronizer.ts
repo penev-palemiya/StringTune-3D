@@ -4,10 +4,14 @@ import { I3DEngine } from "../abstractions/I3DEngine";
 import { GroupSynchronizer } from "./GroupSynchronizer";
 import { LightSynchronizer } from "./LightSynchronizer";
 import { MeshSynchronizer } from "./MeshSynchronizer";
+import { ParticlesSynchronizer } from "./ParticlesSynchronizer";
+import { TextSynchronizer } from "./TextSynchronizer";
 import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 
 export class String3DSynchronizer {
   private strategies: Map<string, String3DObjectSyncStrategy> = new Map();
+  private styleReadIntervalMs = 0;
+  private layoutReadIntervalMs = 0;
 
   constructor(
     public camera: String3DCamera,
@@ -26,9 +30,16 @@ export class String3DSynchronizer {
     this.strategies.set("directionalLight", new LightSynchronizer());
     this.strategies.set("spotLight", new LightSynchronizer());
     this.strategies.set("hemisphereLight", new LightSynchronizer());
+    this.strategies.set("particles", new ParticlesSynchronizer());
+    this.strategies.set("text", new TextSynchronizer());
   }
 
-  public syncElement(el: HTMLElement, object: String3DObject, parentData: any): any {
+  public syncElement(
+    el: HTMLElement,
+    object: String3DObject,
+    parentData: any,
+    hints?: { dirtySet?: Set<HTMLElement> | null; forceSync?: boolean }
+  ): any {
     const strategy = this.strategies.get(object.type);
     if (!strategy) {
       console.warn(`[String3D Sync] No strategy for type "${object.type}"`);
@@ -43,9 +54,18 @@ export class String3DSynchronizer {
         viewportWidth: this.viewportWidth,
         viewportHeight: this.viewportHeight,
         engine: this.engine,
+        dirtySet: hints?.dirtySet,
+        forceSync: hints?.forceSync,
+        styleReadIntervalMs: this.styleReadIntervalMs,
+        layoutReadIntervalMs: this.layoutReadIntervalMs,
       },
       parentData
     );
+  }
+
+  public setSyncOptions(options: { styleReadIntervalMs?: number; layoutReadIntervalMs?: number }): void {
+    this.styleReadIntervalMs = Math.max(0, options.styleReadIntervalMs ?? 0);
+    this.layoutReadIntervalMs = Math.max(0, options.layoutReadIntervalMs ?? 0);
   }
 
   public updateViewportSize(width: number, height: number): void {
