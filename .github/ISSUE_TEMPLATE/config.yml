@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Discussions
+    url: https://github.com/penev-palemiya/StringTune-3D/discussions
+    about: Ask questions and discuss ideas
+  - name: 📖 Documentation
+    url: https://penev.tech/string-tune-3d/overview
+    about: Check the documentation first

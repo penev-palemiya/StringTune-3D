@@ -21,9 +21,19 @@ export class StyleReader {
   readString(prop: string, fallback = ""): string {
     const mapValue = this.styleMap?.get?.(prop);
     const val = mapValue && typeof mapValue === "object" ? (mapValue as any).value : mapValue;
-    if (typeof val === "string") return val.trim() || fallback;
+    if (typeof val === "string") return this.stripQuotes(val.trim()) || fallback;
     const raw = this.style.getPropertyValue(prop).trim();
-    return raw || fallback;
+    return this.stripQuotes(raw) || fallback;
+  }
+
+  private stripQuotes(value: string): string {
+    if (
+      (value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"'))
+    ) {
+      return value.slice(1, -1);
+    }
+    return value;
   }
 
   readBoolean(prop: string, fallback = false): boolean {
@@ -63,20 +73,30 @@ export function readNumberStyle(el: HTMLElement, prop: string, fallback: number)
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+function stripQuotes(value: string): string {
+  if (
+    (value.startsWith("'") && value.endsWith("'")) ||
+    (value.startsWith('"') && value.endsWith('"'))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
 export function readStringStyle(el: HTMLElement, prop: string, fallback = ""): string {
   const styleMap = (el as any).computedStyleMap?.();
   const mapValue = styleMap?.get?.(prop);
   if (typeof mapValue === "string") {
-    return mapValue.trim();
+    return stripQuotes(mapValue.trim());
   }
   if (mapValue && typeof mapValue === "object") {
     const value = (mapValue as any).value;
     if (typeof value === "string") {
-      return value.trim();
+      return stripQuotes(value.trim());
     }
   }
   const style = getComputedStyle(el).getPropertyValue(prop);
-  const result = style ? style.trim() : "";
+  const result = style ? stripQuotes(style.trim()) : "";
   return result || fallback;
 }
 
