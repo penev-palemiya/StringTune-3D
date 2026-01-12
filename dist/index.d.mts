@@ -332,6 +332,7 @@ declare class String3D extends StringModule {
     private dirtySyncManager;
     private lastSyncData;
     private filterController;
+    private needsInitialResize;
     static setProvider(provider: I3DEngineProvider): void;
     static registerFont(name: string, url: string, options?: {
         default?: boolean;

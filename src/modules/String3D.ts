@@ -41,6 +41,7 @@ export class String3D extends StringModule {
   private dirtySyncManager: DirtySyncManager;
   private lastSyncData: WeakMap<String3DObject, { scale: number }> = new WeakMap();
   private filterController: FilterController;
+  private needsInitialResize = true;
 
   public static setProvider(provider: I3DEngineProvider): void {
     String3D.provider = provider;
@@ -287,6 +288,12 @@ export class String3D extends StringModule {
 
   override onFrame(data: StringData): void {
     if (!this.renderer || !this.scene || !this.camera || !this.synchronizer) return;
+
+    if (this.needsInitialResize) {
+      this.needsInitialResize = false;
+      this.renderer.resize(this.camera);
+      this.synchronizer.updateViewportSize(this.renderer.width, this.renderer.height);
+    }
 
     const dirtySet = this.useDirtySync ? this.dirtySyncManager.getDirtySet() : null;
     const forceSync = !dirtySet || dirtySet.size === 0;
