@@ -268,7 +268,6 @@ export class String3DScene {
     const loaderType = object.getProperty<string>("3d-model-loader") || undefined;
     const loader = this.resolveModelLoader(loaderType);
     if (!loader) {
-      console.warn("[String3D] Model loader not configured");
       return;
     }
 
@@ -283,7 +282,6 @@ export class String3DScene {
       (gltf: any) => {
         const root = gltf?.scene || gltf?.object || gltf;
         if (!root) {
-          console.warn("[String3D] Model loader returned empty result");
           return;
         }
 
@@ -309,18 +307,13 @@ export class String3DScene {
         const obj = new String3DObject(object.id, "model", root, this.engine);
         onAdd(obj);
       },
-      (xhr: any) => {
-        console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
-      },
-      (error: any) => {
-        console.error("[String3D] Model loading error:", error);
-      }
+      undefined,
+      undefined
     );
   }
 
   private createParticles(object: StringObject, onAdd: (obj: String3DObject) => void): void {
     if (!this.engine.createParticleSystem) {
-      console.warn("[String3D] Particle system not supported by engine.");
       return;
     }
 
@@ -332,6 +325,8 @@ export class String3DScene {
       color: "#ffffff",
       opacity: 1,
       spread: 120,
+      spreadX: 0,
+      spreadY: 0,
       seed: 1,
       emitRate: 30,
       emitBurst: 0,
@@ -340,27 +335,28 @@ export class String3DScene {
       particleDirection: [0, 1, 0] as [number, number, number],
       particleGravity: [0, -30, 0] as [number, number, number],
       particleDrag: 0.1,
-        particleSizeVariation: 0.6,
-        particleColorVariation: 0.2,
-        particleShape: "sphere",
-        particleModelUrl: "",
-        particleModelLoader: "",
-        particleModelNode: "",
-        instanceShape: "sphere",
-        instanceModelUrl: "",
-        instanceModelLoader: "",
-        instanceModelNode: "",
+      particleSizeVariation: 0.6,
+      particleColorVariation: 0.2,
+      particleShape: "sphere",
+      particleModelUrl: "",
+      particleModelLoader: "",
+      particleModelNode: "",
+      instanceShape: "sphere",
+      instanceModelUrl: "",
+      instanceModelLoader: "",
+      instanceModelNode: "",
       instanceScale: 1,
-        instanceScaleVariation: 0.5,
-        instanceRotationSpeed: 0.4,
-        instanceJitter: 0.2,
-        instanceFlow: 0.3,
-        instanceDisperse: 0,
-        instanceDisperseScatter: 0,
-        instanceDisperseScatterX: 0,
-        instanceDisperseScatterY: 0,
-        instanceDisperseScatterZ: 0,
-      };
+      instanceScaleVariation: 0.5,
+      instanceRotationSpeed: 0.4,
+      instanceJitter: 0.2,
+      instanceFlow: 0.3,
+      instanceDisperse: 0,
+      instanceDisperseScatter: 0,
+      instanceDisperseScatterX: 0,
+      instanceDisperseScatterY: 0,
+      instanceDisperseScatterZ: 0,
+      modelTransitionDuration: 0,
+    };
 
     const system = this.engine.createParticleSystem(config);
     const obj = new String3DObject(object.id, "particles", system, this.engine);
@@ -369,7 +365,6 @@ export class String3DScene {
 
   private createText(object: StringObject, onAdd: (obj: String3DObject) => void): void {
     if (!this.engine.createTextGeometry) {
-      console.warn("[String3D] Text geometry not supported by engine.");
       return;
     }
 
@@ -402,7 +397,6 @@ export class String3DScene {
         return this._modelLoaderCache.get(type);
       }
       if (!this._modelLoaderFactory) {
-        console.warn(`[String3D] No model loader factory for type "${type}"`);
         return undefined;
       }
       const loader = this._modelLoaderFactory(this.engine, type);
@@ -528,11 +522,9 @@ export class String3DScene {
 
     const factory = this.engine.getMaterialFactory?.();
     if (!factory) {
-      console.warn(`[String3D] Material factory not available for custom material "${type}"`);
       return null;
     }
     if (!factory.supports(definition)) {
-      console.warn(`[String3D] Material factory does not support "${type}".`);
       return null;
     }
 
@@ -617,16 +609,11 @@ export class String3DScene {
     if (mappingRaw) {
       try {
         mapping = JSON.parse(mappingRaw);
-      } catch (error) {
-        console.warn("[String3D] Invalid model texture mapping JSON:", error);
-      }
+      } catch (error) {}
     }
 
     const manager = loader?.manager;
     if (!manager || typeof manager.setURLModifier !== "function") {
-      if (mapping || base) {
-        console.warn("[String3D] Model loader does not support URL remap.");
-      }
       return;
     }
 

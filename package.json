@@ -1,6 +1,6 @@
 {
   "name": "string-tune-3d",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "CSS-driven 3D graphics library that lets you control Three.js objects through CSS custom properties.",
   "keywords": [
     "3d",
@@ -69,10 +69,10 @@
   },
   "license": "MIT",
   "peerDependencies": {
-    "@fiddle-digital/string-tune": "^1.1.45"
+    "@fiddle-digital/string-tune": "^1.1.47"
   },
   "devDependencies": {
-    "@fiddle-digital/string-tune": "^1.1.45",
+    "@fiddle-digital/string-tune": "^1.1.47",
     "@types/node": "^20.4.2",
     "terser": "^5.19.0",
     "tsup": "^8.4.0",

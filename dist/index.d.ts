@@ -147,6 +147,8 @@ type ParticleSystemConfig = {
     color: string;
     opacity: number;
     spread: number;
+    spreadX: number;
+    spreadY: number;
     seed: number;
     emitRate: number;
     emitBurst: number;
@@ -175,6 +177,7 @@ type ParticleSystemConfig = {
     instanceDisperseScatterX: number;
     instanceDisperseScatterY: number;
     instanceDisperseScatterZ: number;
+    modelTransitionDuration: number;
 };
 interface I3DParticleSystem extends I3DObject {
     update?(dt: number): void;
@@ -696,15 +699,10 @@ declare class ThreeJSEngine implements I3DEngine {
     loadFont(url: string): Promise<any>;
     private loadFontWithConverter;
     private loadFontWithLoader;
-    /**
-     * Create a Three.js-compatible Font object from FontData
-     */
     private createFontFromData;
-    /**
-     * Generate Three.js Shapes from FontData for given text
-     * This generates shapes for a SINGLE character only (used by buildLineShapes)
-     */
     private generateShapesFromFontData;
+    private getOutlineXMin;
+    private getOutlineXMax;
     private parseOutlineToShapes;
     private reversePath;
     createTextGeometry(text: string, font: any, options: any): I3DGeometry | null;
@@ -712,13 +710,6 @@ declare class ThreeJSEngine implements I3DEngine {
     private getGlyphAdvance;
     private translateShape;
     private scaleShape;
-    private buildGlyphShapesFromCanvas;
-    private measureFontMetrics;
-    private traceContoursFromAlpha;
-    private simplifyCollinear;
-    private simplifyRdp;
-    private pointLineDistance;
-    private contoursToShapes;
     private resolveParticleModelGeometry;
     createParticleSystem(config: ParticleSystemConfig): I3DParticleSystem;
     simplifyGeometry(geometry: I3DGeometry, quality: number): I3DGeometry | null;

@@ -42,7 +42,6 @@ export class String3DSynchronizer {
   ): any {
     const strategy = this.strategies.get(object.type);
     if (!strategy) {
-      console.warn(`[String3D Sync] No strategy for type "${object.type}"`);
       return null;
     }
 
@@ -63,7 +62,10 @@ export class String3DSynchronizer {
     );
   }
 
-  public setSyncOptions(options: { styleReadIntervalMs?: number; layoutReadIntervalMs?: number }): void {
+  public setSyncOptions(options: {
+    styleReadIntervalMs?: number;
+    layoutReadIntervalMs?: number;
+  }): void {
     this.styleReadIntervalMs = Math.max(0, options.styleReadIntervalMs ?? 0);
     this.layoutReadIntervalMs = Math.max(0, options.layoutReadIntervalMs ?? 0);
   }

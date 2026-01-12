@@ -234,7 +234,6 @@ export class FilterController {
     if (warnings.length === 0) return;
     const lastRaw = this.filterWarnings.get(el);
     if (lastRaw === raw) return;
-    warnings.forEach((warning) => console.warn(warning, el));
     this.filterWarnings.set(el, raw);
   }
 

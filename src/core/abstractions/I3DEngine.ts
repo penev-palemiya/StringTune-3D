@@ -99,6 +99,8 @@ export type ParticleSystemConfig = {
   color: string;
   opacity: number;
   spread: number;
+  spreadX: number;
+  spreadY: number;
   seed: number;
   emitRate: number;
   emitBurst: number;
@@ -127,6 +129,7 @@ export type ParticleSystemConfig = {
   instanceDisperseScatterX: number;
   instanceDisperseScatterY: number;
   instanceDisperseScatterZ: number;
+  modelTransitionDuration: number;
 };
 
 export interface I3DParticleSystem extends I3DObject {

@@ -10,18 +10,12 @@ export class String3DFontRegistry {
   static register(name: string, url: string): void {
     const normalized = name.trim();
     if (!normalized) return;
-    if (this.fonts.has(normalized)) {
-      console.warn(`[String3D] Font "${normalized}" already registered. Overwriting.`);
-    }
     this.fonts.set(normalized, { name: normalized, url });
   }
 
   static setDefault(name: string): void {
     const normalized = name.trim();
     if (!normalized) return;
-    if (!this.fonts.has(normalized)) {
-      console.warn(`[String3D] Default font "${normalized}" is not registered yet.`);
-    }
     this.defaultFont = normalized;
   }
 

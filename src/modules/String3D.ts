@@ -46,11 +46,7 @@ export class String3D extends StringModule {
     String3D.provider = provider;
   }
 
-  public static registerFont(
-    name: string,
-    url: string,
-    options: { default?: boolean } = {}
-  ): void {
+  public static registerFont(name: string, url: string, options: { default?: boolean } = {}): void {
     String3DFontRegistry.register(name, url);
     if (options.default) {
       String3DFontRegistry.setDefault(name);
@@ -91,9 +87,7 @@ export class String3D extends StringModule {
   }
 
   override canConnect(object: StringObject): boolean {
-    const result = super.canConnect(object);
-
-    return result;
+    return super.canConnect(object);
   }
 
   override initializeObject(
@@ -131,7 +125,6 @@ export class String3D extends StringModule {
   override onInit(): void {
     this.options = this.buildOptionsFromSettings();
     if (!String3D.provider) {
-      console.error("[String3D] No provider set. Call String3D.setProvider() before use.");
       return;
     }
 
@@ -220,9 +213,7 @@ export class String3D extends StringModule {
     if (this.options.modelLoaderType) {
       try {
         return this.engine.createModelLoader(this.options.modelLoaderType);
-      } catch (error) {
-        console.warn("[String3D] Failed to create model loader:", error);
-      }
+      } catch (error) {}
     }
     return undefined;
   }
@@ -348,7 +339,11 @@ export class String3D extends StringModule {
   ): void {
     if (!this.synchronizer || !el) return;
     const shouldSync =
-      object.type === "particles" || object.type === "text" || forceSync || !dirtySet || dirtySet.has(el);
+      object.type === "particles" ||
+      object.type === "text" ||
+      forceSync ||
+      !dirtySet ||
+      dirtySet.has(el);
     let nextParentData = parentData;
 
     if (shouldSync) {
@@ -581,21 +576,21 @@ export class String3D extends StringModule {
           name,
           syntax:
             name === "--filter" ||
-              name === "--light-target" ||
-              name.startsWith("--texture-") ||
-              name === "--material-type" ||
-              name === "--particles-mode" ||
-              name === "--particles-shape" ||
-              name === "--particles-model" ||
-              name === "--particles-model-loader" ||
-              name === "--particles-model-node" ||
-              name === "--instance-model" ||
-              name === "--instance-model-loader" ||
-              name === "--instance-model-node" ||
-              name === "--particle-direction" ||
-              name === "--particle-gravity" ||
-              name === "--instance-shape" ||
-              name === "--text-fit"
+            name === "--light-target" ||
+            name.startsWith("--texture-") ||
+            name === "--material-type" ||
+            name === "--particles-mode" ||
+            name === "--particles-shape" ||
+            name === "--particles-model" ||
+            name === "--particles-model-loader" ||
+            name === "--particles-model-node" ||
+            name === "--instance-model" ||
+            name === "--instance-model-loader" ||
+            name === "--instance-model-node" ||
+            name === "--particle-direction" ||
+            name === "--particle-gravity" ||
+            name === "--instance-shape" ||
+            name === "--text-fit"
               ? "*"
               : name.includes("color") || name.includes("emissive")
               ? "<color>"

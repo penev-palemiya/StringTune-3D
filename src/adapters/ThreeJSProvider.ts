@@ -204,16 +204,13 @@ export class ThreeJSEngine implements I3DEngine {
     const cachedPromise = this.fontPromiseCache.get(normalized);
     if (cachedPromise) return cachedPromise;
 
-    // Determine if this is a font file (TTF/OTF/WOFF) or typeface.json
     const isFontFile = FontConverter.isFontFile(normalized);
 
     let promise: Promise<any>;
 
     if (isFontFile) {
-      // Use FontConverter for TTF/OTF/WOFF/WOFF2 files
       promise = this.loadFontWithConverter(normalized);
     } else {
-      // Use FontLoader for typeface.json files
       promise = this.loadFontWithLoader(normalized);
     }
 
@@ -224,12 +221,10 @@ export class ThreeJSEngine implements I3DEngine {
   private async loadFontWithConverter(url: string): Promise<any> {
     try {
       const fontData = await FontConverter.load(url);
-      // Convert FontData to Three.js Font format
       const font = this.createFontFromData(fontData);
       this.fontCache.set(url, font);
       return font;
     } catch (error) {
-      console.warn("[String3D] Font conversion error:", error);
       return null;
     }
   }
@@ -237,7 +232,6 @@ export class ThreeJSEngine implements I3DEngine {
   private loadFontWithLoader(url: string): Promise<any> {
     const LoaderClass = this.loaders.font || this.loaders.FontLoader;
     if (!LoaderClass) {
-      console.warn("[String3D] No FontLoader registered.");
       return Promise.resolve(null);
     }
 
@@ -250,48 +244,117 @@ export class ThreeJSEngine implements I3DEngine {
           resolve(font);
         },
         undefined,
-        (error: any) => {
-          console.warn("[String3D] Font loading error:", error);
+        () => {
           resolve(null);
         }
       );
     });
   }
 
-  /**
-   * Create a Three.js-compatible Font object from FontData
-   */
   private createFontFromData(fontData: any): any {
-    // Create a font object compatible with Three.js Font class
-    // Three.js Font expects a specific structure with generateShapes method
     const font = {
       data: fontData,
       generateShapes: (text: string, size: number) => {
-        return this.generateShapesFromFontData(fontData, text, size);
+        return this.generateShapesFromFontData(fontData, text, size, false);
+      },
+      generateNormalizedShapes: (text: string, size: number) => {
+        return this.generateShapesFromFontData(fontData, text, size, true);
       },
     };
     return font;
   }
 
-  /**
-   * Generate Three.js Shapes from FontData for given text
-   * This generates shapes for a SINGLE character only (used by buildLineShapes)
-   */
-  private generateShapesFromFontData(fontData: any, text: string, size: number): any[] {
+  private generateShapesFromFontData(
+    fontData: any,
+    text: string,
+    size: number,
+    normalizePosition: boolean = false
+  ): any[] {
     const shapes: any[] = [];
     const scale = size / fontData.resolution;
 
-    // Only process first character - buildLineShapes handles positioning
     const char = text[0];
     if (!char) return shapes;
 
     const glyph = fontData.glyphs[char];
     if (!glyph || !glyph.o) return shapes;
 
-    const charShapes = this.parseOutlineToShapes(glyph.o, scale, 0);
+    let xOffset = 0;
+    if (normalizePosition) {
+      const xMin = this.getOutlineXMin(glyph.o);
+      xOffset = -xMin * scale;
+    }
+
+    const charShapes = this.parseOutlineToShapes(glyph.o, scale, xOffset);
     shapes.push(...charShapes);
 
     return shapes;
+  }
+
+  private getOutlineXMin(outline: string): number {
+    const commands = outline.split(" ");
+    let minX = Infinity;
+    let i = 0;
+
+    while (i < commands.length) {
+      const cmd = commands[i];
+      switch (cmd) {
+        case "m":
+        case "l":
+          minX = Math.min(minX, parseFloat(commands[i + 1]) || 0);
+          i += 3;
+          break;
+        case "q":
+          minX = Math.min(minX, parseFloat(commands[i + 1]) || 0);
+          minX = Math.min(minX, parseFloat(commands[i + 3]) || 0);
+          i += 5;
+          break;
+        case "b":
+          minX = Math.min(minX, parseFloat(commands[i + 1]) || 0);
+          minX = Math.min(minX, parseFloat(commands[i + 3]) || 0);
+          minX = Math.min(minX, parseFloat(commands[i + 5]) || 0);
+          i += 7;
+          break;
+        default:
+          i++;
+          break;
+      }
+    }
+
+    return minX === Infinity ? 0 : minX;
+  }
+
+  private getOutlineXMax(outline: string): number {
+    const commands = outline.split(" ");
+    let maxX = -Infinity;
+    let i = 0;
+
+    while (i < commands.length) {
+      const cmd = commands[i];
+      switch (cmd) {
+        case "m":
+        case "l":
+          maxX = Math.max(maxX, parseFloat(commands[i + 1]) || 0);
+          i += 3;
+          break;
+        case "q":
+          maxX = Math.max(maxX, parseFloat(commands[i + 1]) || 0);
+          maxX = Math.max(maxX, parseFloat(commands[i + 3]) || 0);
+          i += 5;
+          break;
+        case "b":
+          maxX = Math.max(maxX, parseFloat(commands[i + 1]) || 0);
+          maxX = Math.max(maxX, parseFloat(commands[i + 3]) || 0);
+          maxX = Math.max(maxX, parseFloat(commands[i + 5]) || 0);
+          i += 7;
+          break;
+        default:
+          i++;
+          break;
+      }
+    }
+
+    return maxX === -Infinity ? 0 : maxX;
   }
 
   private parseOutlineToShapes(outline: string, scale: number, offsetX: number = 0): any[] {
@@ -306,7 +369,7 @@ export class ThreeJSEngine implements I3DEngine {
       const cmd = commands[i];
 
       switch (cmd) {
-        case "m": 
+        case "m":
           {
             const mx = parseFloat(commands[i + 1]) * scale + offsetX;
             const my = -parseFloat(commands[i + 2]) * scale;
@@ -315,7 +378,7 @@ export class ThreeJSEngine implements I3DEngine {
           }
           break;
 
-        case "l": 
+        case "l":
           {
             const lx = parseFloat(commands[i + 1]) * scale + offsetX;
             const ly = -parseFloat(commands[i + 2]) * scale;
@@ -324,7 +387,7 @@ export class ThreeJSEngine implements I3DEngine {
           }
           break;
 
-        case "q": 
+        case "q":
           {
             const qx = parseFloat(commands[i + 3]) * scale + offsetX;
             const qy = -parseFloat(commands[i + 4]) * scale;
@@ -338,7 +401,7 @@ export class ThreeJSEngine implements I3DEngine {
           }
           break;
 
-        case "b": 
+        case "b":
           {
             const bx = parseFloat(commands[i + 5]) * scale + offsetX;
             const by = -parseFloat(commands[i + 6]) * scale;
@@ -357,7 +420,10 @@ export class ThreeJSEngine implements I3DEngine {
           {
             if (typeof shapePath.closePath === "function") {
               shapePath.closePath();
-            } else if (shapePath.currentPath && typeof shapePath.currentPath.closePath === "function") {
+            } else if (
+              shapePath.currentPath &&
+              typeof shapePath.currentPath.closePath === "function"
+            ) {
               shapePath.currentPath.closePath();
             }
             i += 1;
@@ -370,35 +436,48 @@ export class ThreeJSEngine implements I3DEngine {
       }
     }
 
-    const shapes = shapePath.toShapes(true);
+    const shapes = shapePath.toShapes(false);
     return shapes;
   }
-  
+
   private reversePath(path: any): any {
-      const newPath = new this.THREE.Path();
-      if (!path.curves || path.curves.length === 0) return newPath;
-      
-      // Start at the END of the last curve
-      const lastCurve = path.curves[path.curves.length - 1];
-      const endPoint = lastCurve.v2 || lastCurve.v3 || (lastCurve.getPoint ? lastCurve.getPoint(1) : null);
-      if (endPoint) {
-          newPath.moveTo(endPoint.x, endPoint.y);
+    const newPath = new this.THREE.Path();
+    if (!path.curves || path.curves.length === 0) return newPath;
+
+    const lastCurve = path.curves[path.curves.length - 1];
+    const endPoint =
+      lastCurve.v2 || lastCurve.v3 || (lastCurve.getPoint ? lastCurve.getPoint(1) : null);
+    if (endPoint) {
+      newPath.moveTo(endPoint.x, endPoint.y);
+    }
+
+    for (let i = path.curves.length - 1; i >= 0; i--) {
+      const curve = path.curves[i];
+      if (curve.isLineCurve || curve.type === "LineCurve" || curve.type === "LineCurve3") {
+        newPath.lineTo(curve.v1.x, curve.v1.y);
+      } else if (
+        curve.isQuadraticBezierCurve ||
+        curve.type === "QuadraticBezierCurve" ||
+        curve.type === "QuadraticBezierCurve3"
+      ) {
+        newPath.quadraticCurveTo(curve.v1.x, curve.v1.y, curve.v0.x, curve.v0.y);
+      } else if (
+        curve.isCubicBezierCurve ||
+        curve.type === "CubicBezierCurve" ||
+        curve.type === "CubicBezierCurve3"
+      ) {
+        newPath.bezierCurveTo(
+          curve.v2.x,
+          curve.v2.y,
+          curve.v1.x,
+          curve.v1.y,
+          curve.v0.x,
+          curve.v0.y
+        );
       }
-      
-      // Iterate backwards
-      for (let i = path.curves.length - 1; i >= 0; i--) {
-          const curve = path.curves[i];
-          // Check type
-          if (curve.isLineCurve || curve.type === 'LineCurve' || curve.type === 'LineCurve3') {
-              newPath.lineTo(curve.v1.x, curve.v1.y);
-          } else if (curve.isQuadraticBezierCurve || curve.type === 'QuadraticBezierCurve' || curve.type === 'QuadraticBezierCurve3') {
-              newPath.quadraticCurveTo(curve.v1.x, curve.v1.y, curve.v0.x, curve.v0.y);
-          } else if (curve.isCubicBezierCurve || curve.type === 'CubicBezierCurve' || curve.type === 'CubicBezierCurve3') {
-              newPath.bezierCurveTo(curve.v2.x, curve.v2.y, curve.v1.x, curve.v1.y, curve.v0.x, curve.v0.y);
-          }
-      }
-      
-      return newPath;
+    }
+
+    return newPath;
   }
 
   createTextGeometry(text: string, font: any, options: any): I3DGeometry | null {
@@ -415,67 +494,32 @@ export class ThreeJSEngine implements I3DEngine {
     const bevelOffset = options.bevelOffset || 0;
     const bevelSegments = Math.max(0, options.bevelSegments || 0);
     const curveSegments = Math.max(1, Math.round(options.curveSegments || 8));
-    const useCanvasText =
-      options.useCanvasText && typeof options.fontCss === "string" && options.fontCss.length > 0;
-
-    if (useCanvasText && typeof document !== "undefined" && document.fonts) {
-      const fontCss = options.fontCss as string;
-      if (!document.fonts.check(fontCss, text)) {
-        document.fonts.load(fontCss, text).catch(() => null);
-        return null;
-      }
-    }
 
     const lines = String(text).split(/\r?\n/);
     const shapes: any[] = [];
-    lines.forEach((line, index) => {
-      // If explicit layout is provided, use it instead of line-based logic for this line?
-      // Actually, if layout is provided, we should probably ignore the `text` splitting logic or apply it differently.
-      // But let's look at how we want to use it.
-      // If options.layout is provided, we should probably skip the line splitting and just use the layout items.
-    });
 
-    const fontMetrics = useCanvasText ? this.measureFontMetrics(options.fontCss) : null;
+    const fontData = font?.data;
+    const resolution = fontData?.resolution || 1000;
+    const ascender = fontData?.ascender || 800;
+    const descender = fontData?.descender || -200;
+    const fontScale = size / resolution;
+    const fontAscent = ascender * fontScale;
 
-    if (options.layout) {
+    if (options.layout && options.layout.length > 0) {
       options.layout.forEach((item: any) => {
-        const charShapes = useCanvasText
-          ? this.buildGlyphShapesFromCanvas(item.char, options.fontCss, options.pixelRatio)
-          : [];
-        const resolvedShapes = useCanvasText
-          ? charShapes
-          : this.buildLineShapes(
-              item.char,
-              font,
-              size,
-              0 // No spacing needed as we position manually
-            ).shapes;
-        // Layout coordinates are typically top-left relative.
-        // In 3D:
-        // x = item.x
-        // y = -item.y (inverted)
+        const charShapes = font.generateShapes(item.char, size);
         const offsetX = item.x;
-        const baselineOffset = useCanvasText
-          ? Number.isFinite(item.height) && fontMetrics
-            ? Math.max(0, item.height - fontMetrics.descent)
-            : fontMetrics?.ascent || 0
-          : 0;
-        const offsetY = useCanvasText ? -(item.y + baselineOffset) : -item.y;
+        const offsetY = -item.y;
 
-        resolvedShapes.forEach((shape) => {
+        charShapes.forEach((shape: any) => {
           let finalShape = this.translateShape(shape, offsetX, offsetY);
           if (item.scale && item.scale !== 1) {
-            // We need to scale the shape.
-            // Shape manipulation for scale is harder.
-            // Easier to scale the geometry later? No, we needed a single geometry.
-            // We can scale the points of the shape.
             finalShape = this.scaleShape(finalShape, item.scale);
           }
           shapes.push(finalShape);
         });
       });
     } else {
-      // Fallback to legacy line-based logic
       lines.forEach((line, index) => {
         const { shapes: lineShapes, width } = this.buildLineShapes(line, font, size, letterSpacing);
         let offsetX = 0;
@@ -518,9 +562,6 @@ export class ThreeJSEngine implements I3DEngine {
     let x = 0;
     const chars = Array.from(line);
 
-    // Debug first call only
-    const debugAdvances: { char: string; advance: number }[] = [];
-
     chars.forEach((char, index) => {
       const charShapes = font.generateShapes(char, size);
       charShapes.forEach((shape: any) => {
@@ -528,10 +569,6 @@ export class ThreeJSEngine implements I3DEngine {
         shapes.push(translated);
       });
       const advance = this.getGlyphAdvance(font, char, size);
-
-      if (debugAdvances.length < 10) {
-        debugAdvances.push({ char, advance });
-      }
 
       x += advance;
       if (letterSpacing !== 0 && index < chars.length - 1) {
@@ -587,15 +624,12 @@ export class ThreeJSEngine implements I3DEngine {
       shape.scale(s, s);
       return shape;
     }
-     // Fallback if shape object doesn't have scale (THREE.Shape doesn't usually have .scale())
-     // applying matrix
     if (typeof shape.applyMatrix4 === "function") {
-       const matrix = new this.THREE.Matrix4().makeScale(s, s, 1);
-       shape.applyMatrix4(matrix);
-       return shape;
+      const matrix = new this.THREE.Matrix4().makeScale(s, s, 1);
+      shape.applyMatrix4(matrix);
+      return shape;
     }
 
-     // Manual point scaling
     if (typeof shape.extractPoints === "function") {
       const { shape: points, holes } = shape.extractPoints(12);
       const toVec2 = (pt: any) => new this.THREE.Vector2((pt.x || 0) * s, (pt.y || 0) * s);
@@ -610,338 +644,6 @@ export class ThreeJSEngine implements I3DEngine {
       return newShape;
     }
     return shape;
-  }
-
-  private buildGlyphShapesFromCanvas(
-    char: string,
-    fontCss: string,
-    pixelRatio?: number
-  ): any[] {
-    if (!char || !fontCss) return [];
-    if (!char.trim()) return [];
-    if (typeof document === "undefined") return [];
-
-    const ratio =
-      typeof pixelRatio === "number"
-        ? Math.max(1, Math.min(3, pixelRatio))
-        : typeof window !== "undefined"
-        ? Math.max(1, Math.min(3, window.devicePixelRatio || 1))
-        : 1;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return [];
-
-    ctx.font = fontCss;
-    ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "left";
-
-    const metrics = ctx.measureText(char);
-    const leftBearingPx = Number.isFinite(metrics.actualBoundingBoxLeft)
-      ? metrics.actualBoundingBoxLeft * ratio
-      : 0;
-    const ascentPx = Number.isFinite(metrics.actualBoundingBoxAscent)
-      ? metrics.actualBoundingBoxAscent * ratio
-      : 0;
-
-    const glyphWidth = Math.max(
-      1,
-      Math.ceil(((metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0)) * ratio)
-    );
-    const glyphHeight = Math.max(
-      1,
-      Math.ceil(((metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0)) * ratio)
-    );
-
-    const pad = Math.ceil(2 * ratio);
-    canvas.width = glyphWidth + pad * 2;
-    canvas.height = glyphHeight + pad * 2;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.font = fontCss;
-    ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#000";
-
-    const drawX = pad + leftBearingPx;
-    const drawY = pad + ascentPx;
-    ctx.fillText(char, drawX, drawY);
-
-    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const contours = this.traceContoursFromAlpha(image.data, canvas.width, canvas.height, 16);
-    if (!contours.length) return [];
-
-    const scale = 1 / ratio;
-    return this.contoursToShapes(contours, scale, pad + leftBearingPx, pad + ascentPx);
-  }
-
-  private measureFontMetrics(fontCss: string): { ascent: number; descent: number } {
-    if (!fontCss) return { ascent: 0, descent: 0 };
-    const cached = this.fontMetricsCache.get(fontCss);
-    if (cached) return cached;
-    if (typeof document === "undefined") {
-      const fallback = { ascent: 0, descent: 0 };
-      this.fontMetricsCache.set(fontCss, fallback);
-      return fallback;
-    }
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      const fallback = { ascent: 0, descent: 0 };
-      this.fontMetricsCache.set(fontCss, fallback);
-      return fallback;
-    }
-    ctx.font = fontCss;
-    ctx.textBaseline = "alphabetic";
-    const metrics = ctx.measureText("Mg");
-    const ascent = Number.isFinite(metrics.actualBoundingBoxAscent)
-      ? metrics.actualBoundingBoxAscent
-      : 0;
-    const descent = Number.isFinite(metrics.actualBoundingBoxDescent)
-      ? metrics.actualBoundingBoxDescent
-      : 0;
-    const result = { ascent, descent };
-    this.fontMetricsCache.set(fontCss, result);
-    return result;
-  }
-
-  private traceContoursFromAlpha(
-    data: Uint8ClampedArray,
-    width: number,
-    height: number,
-    threshold: number
-  ): Array<Array<{ x: number; y: number }>> {
-    const inside = (x: number, y: number): boolean => {
-      if (x < 0 || y < 0 || x >= width || y >= height) return false;
-      const idx = (y * width + x) * 4 + 3;
-      return data[idx] >= threshold;
-    };
-
-    const edgesFrom = new Map<string, string[]>();
-    const edgeKeys: string[] = [];
-    const addEdge = (x1: number, y1: number, x2: number, y2: number): void => {
-      const k1 = `${x1},${y1}`;
-      const k2 = `${x2},${y2}`;
-      let list = edgesFrom.get(k1);
-      if (!list) {
-        list = [];
-        edgesFrom.set(k1, list);
-      }
-      list.push(k2);
-      edgeKeys.push(`${k1}|${k2}`);
-    };
-
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        if (!inside(x, y)) continue;
-        if (!inside(x, y - 1)) {
-          addEdge(x + 1, y, x, y);
-        }
-        if (!inside(x + 1, y)) {
-          addEdge(x + 1, y + 1, x + 1, y);
-        }
-        if (!inside(x, y + 1)) {
-          addEdge(x, y + 1, x + 1, y + 1);
-        }
-        if (!inside(x - 1, y)) {
-          addEdge(x, y, x, y + 1);
-        }
-      }
-    }
-
-    const used = new Set<string>();
-    const contours: Array<Array<{ x: number; y: number }>> = [];
-    const parsePoint = (key: string): { x: number; y: number } => {
-      const [sx, sy] = key.split(",");
-      return { x: Number(sx), y: Number(sy) };
-    };
-
-    for (const edgeKey of edgeKeys) {
-      if (used.has(edgeKey)) continue;
-      const [startKey, endKey] = edgeKey.split("|");
-      const loop: Array<{ x: number; y: number }> = [];
-      used.add(edgeKey);
-      loop.push(parsePoint(startKey));
-      let currentKey = endKey;
-      let guard = 0;
-
-      while (currentKey !== startKey && guard < width * height * 4) {
-        loop.push(parsePoint(currentKey));
-        const nextList = edgesFrom.get(currentKey);
-        if (!nextList || nextList.length === 0) break;
-        let nextKey: string | null = null;
-        for (const candidate of nextList) {
-          const candEdge = `${currentKey}|${candidate}`;
-          if (!used.has(candEdge)) {
-            nextKey = candidate;
-            used.add(candEdge);
-            break;
-          }
-        }
-        if (!nextKey) break;
-        currentKey = nextKey;
-        guard += 1;
-      }
-
-    if (loop.length >= 3) {
-        const cleaned = this.simplifyCollinear(loop);
-        const simplified = this.simplifyRdp(cleaned, 0.75);
-        if (simplified.length >= 3) {
-          contours.push(simplified);
-        }
-      }
-    }
-
-    return contours;
-  }
-
-  private simplifyCollinear(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
-    if (points.length < 4) return points;
-    const result: Array<{ x: number; y: number }> = [];
-    const len = points.length;
-    for (let i = 0; i < len; i += 1) {
-      const prev = points[(i - 1 + len) % len];
-      const curr = points[i];
-      const next = points[(i + 1) % len];
-      const dx1 = curr.x - prev.x;
-      const dy1 = curr.y - prev.y;
-      const dx2 = next.x - curr.x;
-      const dy2 = next.y - curr.y;
-      const cross = dx1 * dy2 - dy1 * dx2;
-      if (Math.abs(cross) > 0) {
-        result.push(curr);
-      }
-    }
-    return result;
-  }
-
-  private simplifyRdp(
-    points: Array<{ x: number; y: number }>,
-    epsilon: number
-  ): Array<{ x: number; y: number }> {
-    if (points.length < 3) return points;
-    const last = points.length - 1;
-    let maxDist = 0;
-    let index = 0;
-    const start = points[0];
-    const end = points[last];
-    for (let i = 1; i < last; i += 1) {
-      const d = this.pointLineDistance(points[i], start, end);
-      if (d > maxDist) {
-        maxDist = d;
-        index = i;
-      }
-    }
-    if (maxDist <= epsilon) {
-      return [start, end];
-    }
-    const left = this.simplifyRdp(points.slice(0, index + 1), epsilon);
-    const right = this.simplifyRdp(points.slice(index), epsilon);
-    return left.slice(0, -1).concat(right);
-  }
-
-  private pointLineDistance(
-    point: { x: number; y: number },
-    start: { x: number; y: number },
-    end: { x: number; y: number }
-  ): number {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    if (dx === 0 && dy === 0) {
-      const px = point.x - start.x;
-      const py = point.y - start.y;
-      return Math.sqrt(px * px + py * py);
-    }
-    const t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy);
-    const clamped = Math.max(0, Math.min(1, t));
-    const projX = start.x + clamped * dx;
-    const projY = start.y + clamped * dy;
-    const ox = point.x - projX;
-    const oy = point.y - projY;
-    return Math.sqrt(ox * ox + oy * oy);
-  }
-
-  private contoursToShapes(
-    contours: Array<Array<{ x: number; y: number }>>,
-    scale: number,
-    offsetX: number = 0,
-    offsetY: number = 0
-  ): any[] {
-    if (!contours.length) return [];
-    const solids: Array<{ shape: any; points: Array<{ x: number; y: number }> }> = [];
-    const holes: Array<{ path: any; point: { x: number; y: number } }> = [];
-
-    const signedArea = (pts: Array<{ x: number; y: number }>): number => {
-      let area = 0;
-      for (let i = 0; i < pts.length; i += 1) {
-        const a = pts[i];
-        const b = pts[(i + 1) % pts.length];
-        area += a.x * b.y - b.x * a.y;
-      }
-      return area * 0.5;
-    };
-
-    const toScaled = (pts: Array<{ x: number; y: number }>) =>
-      pts.map((p) => ({ x: (p.x - offsetX) * scale, y: -(p.y - offsetY) * scale }));
-
-    for (const contour of contours) {
-      if (contour.length < 3) continue;
-      const pts = toScaled(contour);
-      const area = signedArea(pts);
-
-      if (area >= 0) {
-        const shape = new this.THREE.Shape();
-        shape.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i += 1) {
-          shape.lineTo(pts[i].x, pts[i].y);
-        }
-        if (typeof shape.closePath === "function") {
-          shape.closePath();
-        }
-        solids.push({ shape, points: pts });
-      } else {
-        const path = new this.THREE.Path();
-        path.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i += 1) {
-          path.lineTo(pts[i].x, pts[i].y);
-        }
-        if (typeof path.closePath === "function") {
-          path.closePath();
-        }
-        holes.push({ path, point: pts[0] });
-      }
-    }
-
-    const pointInPoly = (pt: { x: number; y: number }, poly: Array<{ x: number; y: number }>) => {
-      let inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        const xi = poly[i].x;
-        const yi = poly[i].y;
-        const xj = poly[j].x;
-        const yj = poly[j].y;
-        const intersect =
-          yi > pt.y !== yj > pt.y &&
-          pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi + Number.EPSILON) + xi;
-        if (intersect) inside = !inside;
-      }
-      return inside;
-    };
-
-    for (const hole of holes) {
-      let assigned = false;
-      for (const solid of solids) {
-        if (pointInPoly(hole.point, solid.points)) {
-          solid.shape.holes.push(hole.path);
-          assigned = true;
-          break;
-        }
-      }
-      if (!assigned && solids.length > 0) {
-        solids[0].shape.holes.push(hole.path);
-      }
-    }
-
-    return solids.map((s) => s.shape);
   }
 
   private resolveParticleModelGeometry(
@@ -961,7 +663,6 @@ export class ThreeJSEngine implements I3DEngine {
         ? "gltf"
         : Object.keys(this.loaders)[0];
     if (!normalizedLoader) {
-      console.warn("[String3D] No model loader registered for particle models.");
       return Promise.resolve(null);
     }
 
@@ -980,7 +681,6 @@ export class ThreeJSEngine implements I3DEngine {
       try {
         loader = this.createModelLoader(normalizedLoader);
       } catch (error) {
-        console.warn("[String3D] Failed to create model loader:", error);
         resolve(null);
         return;
       }
@@ -1029,8 +729,7 @@ export class ThreeJSEngine implements I3DEngine {
           resolve(geometry);
         },
         undefined,
-        (error: any) => {
-          console.warn("[String3D] Particle model loading error:", error);
+        () => {
           resolve(null);
         }
       );
@@ -1081,6 +780,14 @@ export class ThreeJSEngine implements I3DEngine {
       private materialOverrideForPoints: any = null;
       private defaultEmitterMaterial: any = null;
       private defaultInstancedMaterial: any = null;
+      private transitionStartTime = 0;
+      private transitionDuration = 0;
+      private isTransitioning = false;
+      private transitionFromPositions: Float32Array = new Float32Array(0);
+      private transitionToPositions: Float32Array = new Float32Array(0);
+      private pendingTransition = false;
+      private pendingTransitionKey = "";
+      private pendingDistributionLoad = false;
 
       constructor(cfg: ParticleSystemConfig) {
         super();
@@ -1120,9 +827,31 @@ export class ThreeJSEngine implements I3DEngine {
           prev.instanceScale !== this.cfg.instanceScale ||
           prev.instanceScaleVariation !== this.cfg.instanceScaleVariation;
         if (needsRebuild) {
-          this.refreshModelGeometry();
-          this.refreshDistributionGeometry();
-          this.rebuild();
+          const isParticleModelChange =
+            this.cfg.mode === "instanced" &&
+            this.instanced &&
+            this.cfg.modelTransitionDuration > 0 &&
+            (prev.particleModelUrl !== this.cfg.particleModelUrl ||
+              prev.particleModelLoader !== this.cfg.particleModelLoader ||
+              prev.particleModelNode !== this.cfg.particleModelNode ||
+              prev.particleShape !== this.cfg.particleShape);
+
+          const isInstanceModelChange =
+            this.cfg.mode === "instanced" &&
+            this.instanced &&
+            this.cfg.modelTransitionDuration > 0 &&
+            (prev.instanceModelUrl !== this.cfg.instanceModelUrl ||
+              prev.instanceModelLoader !== this.cfg.instanceModelLoader ||
+              prev.instanceModelNode !== this.cfg.instanceModelNode ||
+              prev.instanceShape !== this.cfg.instanceShape);
+
+          if (isParticleModelChange || isInstanceModelChange) {
+            this.startModelTransition();
+          } else {
+            this.refreshModelGeometry();
+            this.refreshDistributionGeometry();
+            this.rebuild();
+          }
           return;
         }
         if (emitterReset) {
@@ -1152,9 +881,265 @@ export class ThreeJSEngine implements I3DEngine {
         this.pendingBurst = this.cfg.emitBurst;
       }
 
+      private startModelTransition(): void {
+        this.transitionFromPositions = new Float32Array(this.basePositions);
+        this.transitionDuration = this.cfg.modelTransitionDuration;
+
+        const url = this.cfg.instanceModelUrl?.trim();
+        const key = `${this.cfg.instanceModelLoader}|${url}|${this.cfg.instanceModelNode}`;
+        this.pendingTransition = true;
+        this.pendingTransitionKey = key;
+
+        this.refreshModelGeometry();
+        this.refreshDistributionGeometryForTransition();
+      }
+
+      private refreshDistributionGeometryForTransition(): void {
+        if (this.cfg.instanceShape !== "model") {
+          this.startMorphTransition();
+          return;
+        }
+        const url = this.cfg.instanceModelUrl?.trim();
+        if (!url || url === "none") {
+          this.startMorphTransition();
+          return;
+        }
+        const key = `${this.cfg.instanceModelLoader}|${url}|${this.cfg.instanceModelNode}`;
+
+        if (this.distributionKey === key && this.distributionGeometry) {
+          this.startMorphTransition();
+          return;
+        }
+
+        this.distributionKey = key;
+        engine
+          .resolveParticleModelGeometry(
+            url,
+            this.cfg.instanceModelLoader,
+            this.cfg.instanceModelNode
+          )
+          .then((geometry) => {
+            if (!geometry) return;
+            if (this.distributionKey !== key) return;
+            if (!this.pendingTransition || this.pendingTransitionKey !== key) return;
+
+            this.distributionGeometry = geometry;
+            this.startMorphTransition();
+          });
+      }
+
+      private startMorphTransition(): void {
+        this.pendingTransition = false;
+        this.pendingTransitionKey = "";
+
+        const count = Math.max(1, this.cfg.count);
+        this.transitionToPositions = new Float32Array(count * 3);
+
+        const useModel = this.cfg.instanceShape === "model" && this.distributionGeometry;
+        if (useModel) {
+          this.fillFromModelToArray(count, this.distributionGeometry, this.transitionToPositions);
+        } else {
+          for (let i = 0; i < count; i += 1) {
+            const pos =
+              this.cfg.instanceShape === "box"
+                ? this.randomInBox(this.cfg.spread)
+                : this.randomInSphere(this.cfg.spread);
+            this.transitionToPositions.set(pos, i * 3);
+          }
+        }
+
+        this.transitionStartTime = this.elapsed;
+        this.isTransitioning = true;
+      }
+
+      private cleanupOutgoing(): void {
+        this.isTransitioning = false;
+        this.pendingTransition = false;
+        this.pendingTransitionKey = "";
+        this.transitionFromPositions = new Float32Array(0);
+        this.transitionToPositions = new Float32Array(0);
+      }
+
+      private updateTransition(): void {
+        if (!this.isTransitioning) return;
+
+        const elapsed = this.elapsed - this.transitionStartTime;
+        const progress = Math.min(1, elapsed / this.transitionDuration);
+
+        const eased =
+          progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+        const count = Math.min(
+          this.transitionFromPositions.length / 3,
+          this.transitionToPositions.length / 3,
+          this.basePositions.length / 3
+        );
+
+        for (let i = 0; i < count; i += 1) {
+          const i3 = i * 3;
+          this.basePositions[i3] =
+            this.transitionFromPositions[i3] +
+            (this.transitionToPositions[i3] - this.transitionFromPositions[i3]) * eased;
+          this.basePositions[i3 + 1] =
+            this.transitionFromPositions[i3 + 1] +
+            (this.transitionToPositions[i3 + 1] - this.transitionFromPositions[i3 + 1]) * eased;
+          this.basePositions[i3 + 2] =
+            this.transitionFromPositions[i3 + 2] +
+            (this.transitionToPositions[i3 + 2] - this.transitionFromPositions[i3 + 2]) * eased;
+        }
+
+        if (progress >= 1) {
+          for (let i = 0; i < count * 3; i += 1) {
+            this.basePositions[i] = this.transitionToPositions[i];
+          }
+          this.cleanupOutgoing();
+        }
+      }
+
+      private fillFromModelToArray(count: number, geometry: any, targetArray: Float32Array): void {
+        const attr = geometry?.attributes?.position;
+        if (!attr?.array || attr.itemSize < 3) {
+          for (let i = 0; i < count; i += 1) {
+            const pos = this.randomInSphere(this.cfg.spread);
+            targetArray.set(pos, i * 3);
+          }
+          return;
+        }
+
+        const array = attr.array as ArrayLike<number>;
+        const itemSize = attr.itemSize;
+        const vertexCount = Math.floor(array.length / itemSize);
+        if (vertexCount <= 0) {
+          return;
+        }
+
+        const indexArray = geometry?.index?.array as ArrayLike<number> | undefined;
+        const triangleCount = indexArray
+          ? Math.floor(indexArray.length / 3)
+          : Math.floor(vertexCount / 3);
+        if (triangleCount <= 0) {
+          return;
+        }
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let minZ = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        let maxZ = -Infinity;
+        for (let i = 0; i < vertexCount; i += 1) {
+          const idx = i * itemSize;
+          const x = array[idx];
+          const y = array[idx + 1];
+          const z = array[idx + 2];
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          minZ = Math.min(minZ, z);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+          maxZ = Math.max(maxZ, z);
+        }
+        const sizeX = Math.max(1e-6, maxX - minX);
+        const sizeY = Math.max(1e-6, maxY - minY);
+        const sizeZ = Math.max(1e-6, maxZ - minZ);
+        const targetX = (this.cfg.spreadX > 0 ? this.cfg.spreadX : this.cfg.spread) * 2;
+        const targetY = (this.cfg.spreadY > 0 ? this.cfg.spreadY : this.cfg.spread) * 2;
+        const scaleX = targetX > 0 ? targetX / sizeX : 1;
+        const scaleY = targetY > 0 ? targetY / sizeY : 1;
+        const scale = Math.min(scaleX, scaleY);
+        const centerX = (minX + maxX) * 0.5;
+        const centerY = (minY + maxY) * 0.5;
+        const centerZ = (minZ + maxZ) * 0.5;
+
+        const cumulativeAreas = new Float32Array(triangleCount);
+        let totalArea = 0;
+        for (let i = 0; i < triangleCount; i += 1) {
+          const base = i * 3;
+          const ia = indexArray ? indexArray[base] : base;
+          const ib = indexArray ? indexArray[base + 1] : base + 1;
+          const ic = indexArray ? indexArray[base + 2] : base + 2;
+          const a = ia * itemSize;
+          const b = ib * itemSize;
+          const c = ic * itemSize;
+          const ax = array[a];
+          const ay = array[a + 1];
+          const az = array[a + 2];
+          const bx = array[b];
+          const by = array[b + 1];
+          const bz = array[b + 2];
+          const cx = array[c];
+          const cy = array[c + 1];
+          const cz = array[c + 2];
+          const abx = bx - ax;
+          const aby = by - ay;
+          const abz = bz - az;
+          const acx = cx - ax;
+          const acy = cy - ay;
+          const acz = cz - az;
+          const crossX = aby * acz - abz * acy;
+          const crossY = abz * acx - abx * acz;
+          const crossZ = abx * acy - aby * acx;
+          const area = Math.sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ) * 0.5;
+          totalArea += area;
+          cumulativeAreas[i] = totalArea;
+        }
+        if (totalArea <= 0) {
+          for (let i = 0; i < count; i += 1) {
+            const pos = this.randomInSphere(this.cfg.spread);
+            targetArray.set(pos, i * 3);
+          }
+          return;
+        }
+
+        for (let i = 0; i < count; i += 1) {
+          const r = this.rng() * totalArea;
+          let lo = 0;
+          let hi = triangleCount - 1;
+          while (lo < hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (r <= cumulativeAreas[mid]) {
+              hi = mid;
+            } else {
+              lo = mid + 1;
+            }
+          }
+          const base = lo * 3;
+          const ia = indexArray ? indexArray[base] : base;
+          const ib = indexArray ? indexArray[base + 1] : base + 1;
+          const ic = indexArray ? indexArray[base + 2] : base + 2;
+          const a = ia * itemSize;
+          const b = ib * itemSize;
+          const c = ic * itemSize;
+          const ax = array[a];
+          const ay = array[a + 1];
+          const az = array[a + 2];
+          const bx = array[b];
+          const by = array[b + 1];
+          const bz = array[b + 2];
+          const cx = array[c];
+          const cy = array[c + 1];
+          const cz = array[c + 2];
+          const u = this.rng();
+          const v = this.rng();
+          const su = Math.sqrt(u);
+          const w1 = 1 - su;
+          const w2 = su * (1 - v);
+          const w3 = su * v;
+          const x = (ax * w1 + bx * w2 + cx * w3 - centerX) * scale;
+          const y = (ay * w1 + by * w2 + cy * w3 - centerY) * scale;
+          const z = (az * w1 + bz * w2 + cz * w3 - centerZ) * scale;
+          targetArray[i * 3] = x;
+          targetArray[i * 3 + 1] = y;
+          targetArray[i * 3 + 2] = z;
+        }
+      }
+
       update(dt: number): void {
         if (dt <= 0) return;
         this.elapsed += dt;
+
+        this.updateTransition();
+
         if (this.cfg.mode === "emitter") {
           this.updateEmitter(dt);
         } else {
@@ -1163,6 +1148,7 @@ export class ThreeJSEngine implements I3DEngine {
       }
 
       dispose(): void {
+        this.cleanupOutgoing();
         if (this.points) {
           this.points.geometry.dispose();
           this.points.material.dispose();
@@ -1195,6 +1181,14 @@ export class ThreeJSEngine implements I3DEngine {
         if (this.cfg.mode === "emitter") {
           this.buildEmitter();
         } else {
+          const needsModel = this.cfg.instanceShape === "model";
+          const hasModel = this.distributionGeometry !== null;
+          if (needsModel && !hasModel) {
+            this.pendingDistributionLoad = true;
+            this.refreshDistributionGeometry();
+            return;
+          }
+          this.pendingDistributionLoad = false;
           this.refreshDistributionGeometry();
           this.buildInstanced();
         }
@@ -1555,7 +1549,13 @@ export class ThreeJSEngine implements I3DEngine {
             if (this.distributionKey !== key) return;
             this.distributionGeometry = geometry;
             if (this.cfg.mode === "instanced" && this.cfg.instanceShape === "model") {
-              this.rebuild();
+              if (this.pendingDistributionLoad) {
+                this.pendingDistributionLoad = false;
+                this.buildInstanced();
+                this.applyMaterialOverrides();
+              } else {
+                this.rebuild();
+              }
             }
           });
       }
@@ -1633,9 +1633,11 @@ export class ThreeJSEngine implements I3DEngine {
         const sizeX = Math.max(1e-6, maxX - minX);
         const sizeY = Math.max(1e-6, maxY - minY);
         const sizeZ = Math.max(1e-6, maxZ - minZ);
-        const maxSize = Math.max(sizeX, sizeY, sizeZ);
-        const targetSize = this.cfg.spread * 2;
-        const scale = targetSize > 0 ? targetSize / maxSize : 1;
+        const targetX = (this.cfg.spreadX > 0 ? this.cfg.spreadX : this.cfg.spread) * 2;
+        const targetY = (this.cfg.spreadY > 0 ? this.cfg.spreadY : this.cfg.spread) * 2;
+        const scaleX = targetX > 0 ? targetX / sizeX : 1;
+        const scaleY = targetY > 0 ? targetY / sizeY : 1;
+        const scale = Math.min(scaleX, scaleY);
         const centerX = (minX + maxX) * 0.5;
         const centerY = (minY + maxY) * 0.5;
         const centerZ = (minZ + maxZ) * 0.5;

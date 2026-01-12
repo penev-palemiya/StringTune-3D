@@ -71,9 +71,6 @@ export class String3DCustomMaterialRegistry {
     if (!name) {
       throw new Error("[String3D] Custom material name is required.");
     }
-    if (this.materials.has(name)) {
-      console.warn(`[String3D] Material "${name}" already registered. Overwriting.`);
-    }
     this.materials.set(name, { ...definition, name });
     this.registerCssVarsForMaterial(definition);
   }
@@ -98,9 +95,7 @@ export class String3DCustomMaterialRegistry {
           initialValue: this.defaultCssInitialValue(def),
         });
         this.registeredCssVars.add(cssVar);
-      } catch (err) {
-        console.warn(`[String3D] Failed to register CSS property ${cssVar}:`, err);
-      }
+      } catch (err) {}
     }
   }
 

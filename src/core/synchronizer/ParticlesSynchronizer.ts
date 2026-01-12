@@ -26,6 +26,8 @@ const DEFAULT_CONFIG: ParticleSystemConfig = {
   color: "#ffffff",
   opacity: 1,
   spread: 120,
+  spreadX: 120,
+  spreadY: 120,
   seed: 1,
   emitRate: 30,
   emitBurst: 0,
@@ -54,6 +56,7 @@ const DEFAULT_CONFIG: ParticleSystemConfig = {
   instanceDisperseScatterX: 0,
   instanceDisperseScatterY: 0,
   instanceDisperseScatterZ: 0,
+  modelTransitionDuration: 0,
 };
 
 export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
@@ -210,8 +213,99 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
           "--instance-scatter-z",
           DEFAULT_CONFIG.instanceDisperseScatterZ
         ),
+        modelTransitionDuration: this.getTransitionDuration(el, "--instance-model"),
       };
     });
+  }
+
+  private getTransitionDuration(el: HTMLElement, property: string): number {
+    const style = getComputedStyle(el);
+    const properties = this.splitTransitionList(style.transitionProperty);
+    const durations = this.splitTransitionList(style.transitionDuration);
+
+    const index = this.findTransitionIndex(properties, property);
+    if (index === -1) {
+      const shorthand = this.parseTransitionShorthand(style.transition);
+      const match = shorthand.get(property) || shorthand.get("all");
+      return match ? match.duration : 0;
+    }
+
+    return this.parseTime(durations[index] || durations[durations.length - 1] || "0s");
+  }
+
+  private splitTransitionList(value: string): string[] {
+    const result: string[] = [];
+    let current = "";
+    let depth = 0;
+    for (let i = 0; i < value.length; i += 1) {
+      const ch = value[i];
+      if (ch === "(") depth += 1;
+      if (ch === ")") depth = Math.max(0, depth - 1);
+      if (ch === "," && depth === 0) {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) result.push(current.trim());
+    return result.length > 0 ? result : ["all"];
+  }
+
+  private findTransitionIndex(properties: string[], name: string): number {
+    const normalized = properties.map((prop) => prop.trim().toLowerCase());
+    let index = normalized.indexOf(name);
+    if (index === -1) {
+      index = normalized.indexOf("all");
+    }
+    return index;
+  }
+
+  private parseTime(value: string): number {
+    const raw = value.trim().toLowerCase();
+    if (raw.endsWith("ms")) {
+      const num = Number.parseFloat(raw.slice(0, -2));
+      return Number.isFinite(num) ? num / 1000 : 0;
+    }
+    if (raw.endsWith("s")) {
+      const num = Number.parseFloat(raw.slice(0, -1));
+      return Number.isFinite(num) ? num : 0;
+    }
+    const num = Number.parseFloat(raw);
+    return Number.isFinite(num) ? num : 0;
+  }
+
+  private parseTransitionShorthand(value: string): Map<string, { duration: number }> {
+    const map = new Map<string, { duration: number }>();
+    const parts = this.splitTransitionList(value);
+    parts.forEach((part) => {
+      if (!part) return;
+      const tokens = part.trim().split(/\s+(?![^()]*\))/g);
+      let prop = "";
+      let duration = "";
+      tokens.forEach((token) => {
+        const lower = token.toLowerCase();
+        if (lower.endsWith("ms") || lower.endsWith("s") || /^[0-9.]+$/.test(lower)) {
+          if (!duration) duration = lower;
+        } else if (
+          lower.startsWith("cubic-bezier") ||
+          lower.startsWith("steps") ||
+          lower === "linear" ||
+          lower === "ease" ||
+          lower === "ease-in" ||
+          lower === "ease-out" ||
+          lower === "ease-in-out"
+        ) {
+        } else if (!prop) {
+          prop = token;
+        }
+      });
+      if (!prop) return;
+      map.set(prop.trim().toLowerCase(), {
+        duration: this.parseTime(duration || "0s"),
+      });
+    });
+    return map;
   }
 
   private parseVec3(value: string, fallback: [number, number, number]): [number, number, number] {
@@ -244,17 +338,27 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
   ): ParticleSystemConfig {
     const parentScale = parentData?.scale ?? 1;
     const scale = parentScale;
-    const fitBase = Math.min(rect.width, rect.height);
-    const fitMultiplier =
-      bundle.instanceShape === "box" || bundle.instanceShape === "model" ? 1 : 0.5;
-    const spreadPixels = bundle.particlesFit ? fitBase * fitMultiplier : bundle.spread;
-    const spread = this.toWorld(spreadPixels, bundle.translateZ, ctx);
+    const fitMultiplier = 0.5;
+    let spread: number;
+    let spreadX: number;
+    let spreadY: number;
+    if (bundle.particlesFit) {
+      spreadX = this.toWorld(rect.width * fitMultiplier, bundle.translateZ, ctx);
+      spreadY = this.toWorld(rect.height * fitMultiplier, bundle.translateZ, ctx);
+      spread = Math.max(spreadX, spreadY);
+    } else {
+      spread = this.toWorld(bundle.spread, bundle.translateZ, ctx);
+      spreadX = spread;
+      spreadY = spread;
+    }
     return {
       ...bundle,
       count: Math.max(0, Math.floor(bundle.count)),
       size: Math.max(0.1, bundle.size),
       opacity: Math.max(0, Math.min(1, bundle.opacity)),
       spread: Math.max(0, spread * scale),
+      spreadX: Math.max(0, spreadX * scale),
+      spreadY: Math.max(0, spreadY * scale),
       seed: Math.max(0, Math.floor(bundle.seed)),
       emitRate: Math.max(0, bundle.emitRate),
       emitBurst: Math.max(0, bundle.emitBurst),

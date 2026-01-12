@@ -9,6 +9,36 @@ const DEG_TO_RAD = Math.PI / 180;
 
 const DEBUG_TEXT_SYNC = false;
 
+const PSEUDO_ELEMENT_CSS = `
+[data-string3d-text] {
+  -webkit-text-fill-color: transparent;
+}
+
+[data-string3d-text]::before {
+  content: attr(data-string3d-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  
+  color: inherit;
+  -webkit-text-fill-color: initial;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  white-space: inherit;
+  word-spacing: inherit;
+  
+  transform: var(--string3d-transform, none);
+  transform-style: preserve-3d;
+  transform-origin: center center;
+}
+`;
+
 export class TextSynchronizer implements String3DObjectSyncStrategy {
   private static styleCache = new StyleBundleCache<StyleBundle>();
   private static layoutCache = new StyleBundleCache<LayoutBundle>();
@@ -18,12 +48,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
   private static pendingFontObjects: Map<string, Set<String3DObject>> = new Map();
   private static warnedMissingFont = false;
   private static warnedMissingLoader = false;
-
-  private static log(...args: any[]): void {
-    if (DEBUG_TEXT_SYNC) {
-      console.log("[TextSync]", ...args);
-    }
-  }
+  private static pseudoStyleInjected = false;
 
   private static markObjectPendingFont(fontUrl: string, object: String3DObject): void {
     let set = this.pendingFontObjects.get(fontUrl);
@@ -53,7 +78,55 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     }
   }
 
+  private static injectPseudoElementStyles(): void {
+    if (this.pseudoStyleInjected || typeof document === "undefined") return;
+
+    const style = document.createElement("style");
+    style.setAttribute("data-string3d", "pseudo-text");
+    style.textContent = PSEUDO_ELEMENT_CSS;
+    document.head.appendChild(style);
+    this.pseudoStyleInjected = true;
+  }
+
+  private static setupSelectableText(el: HTMLElement): void {
+    const textContent = el.textContent || "";
+
+    if (el.dataset.string3dText !== textContent) {
+      el.dataset.string3dText = textContent;
+    }
+
+    const computed = getComputedStyle(el);
+    if (computed.position === "static") {
+      el.style.position = "relative";
+    }
+
+    const rx = computed.getPropertyValue("--rotate-x").trim() || "0";
+    const ry = computed.getPropertyValue("--rotate-y").trim() || "0";
+    const rz = computed.getPropertyValue("--rotate-z").trim() || "0";
+    const tx = computed.getPropertyValue("--translate-x").trim() || "0px";
+    const ty = computed.getPropertyValue("--translate-y").trim() || "0px";
+    const tz = computed.getPropertyValue("--translate-z").trim() || "0px";
+    const s = computed.getPropertyValue("--scale").trim() || "1";
+
+    const transform = [
+      tx !== "0px" && tx !== "0" ? `translateX(${tx})` : "",
+      ty !== "0px" && ty !== "0" ? `translateY(${ty})` : "",
+      tz !== "0px" && tz !== "0" ? `translateZ(${tz})` : "",
+      rx !== "0" ? `rotateX(${rx}deg)` : "",
+      ry !== "0" ? `rotateY(${ry}deg)` : "",
+      rz !== "0" ? `rotateZ(${rz}deg)` : "",
+      s !== "1" ? `scale(${s})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    el.style.setProperty("--string3d-transform", transform || "none");
+  }
+
   sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any {
+    TextSynchronizer.injectPseudoElementStyles();
+    TextSynchronizer.setupSelectableText(el);
+
     const { rect, width: originalWidth, height: originalHeight } = this.readLayout(el, ctx);
     const bundle = this.readStyleBundle(el, ctx);
 
@@ -132,7 +205,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     const fontEntry = String3DFontRegistry.resolveFontFamily(fontFamily || "");
     if (!fontEntry) {
       if (!TextSynchronizer.warnedMissingFont) {
-        console.warn("[String3D] No registered font found for 3D text. Font family:", fontFamily);
         TextSynchronizer.warnedMissingFont = true;
       }
       return { scale: cssScale * (parentData?.scale || 1) };
@@ -141,7 +213,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
     if (!ctx.engine.loadFont || !ctx.engine.createTextGeometry) {
       if (!TextSynchronizer.warnedMissingLoader) {
-        console.warn("[String3D] Engine does not support text geometry.");
         TextSynchronizer.warnedMissingLoader = true;
       }
       return { scale: cssScale * (parentData?.scale || 1) };
@@ -199,16 +270,13 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         layoutSig
       );
 
-      const adjustedLayout = useCanvasText
-        ? layout
-        : (() => {
-            const metrics = TextSynchronizer.getFontMetrics(font, fontSize);
-            const ascent = metrics ? metrics.ascent : fontSize * 0.8;
-            return layout.map((item) => ({
-              ...item,
-              y: item.y + ascent,
-            }));
-          })();
+      const metrics = TextSynchronizer.getFontMetrics(font, fontSize);
+      const ascent = metrics ? metrics.ascent : fontSize * 0.8;
+
+      const adjustedLayout = layout.map((item) => ({
+        ...item,
+        y: item.y + ascent,
+      }));
 
       const geometry = ctx.engine.createTextGeometry(textContent, font, {
         size: fontSize,
@@ -223,8 +291,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         letterSpacing: 0,
         align: "left",
         layout: adjustedLayout,
-        fontCss,
-        useCanvasText: true,
       });
 
       if (geometry) {
