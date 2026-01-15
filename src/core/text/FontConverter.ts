@@ -7,6 +7,7 @@ export interface FontData {
   underlineThickness: number;
   boundingBox: { xMin: number; xMax: number; yMin: number; yMax: number };
   resolution: number;
+  outlineFormat: string;
   original_font_information: Record<string, any>;
 }
 
@@ -186,22 +187,52 @@ export class FontConverter {
 
     const glyphs: Record<string, GlyphData> = {};
 
-    for (let i = 0; i < font.glyphs.length; i++) {
-      const glyph = font.glyphs.get(i);
-      if (!glyph.unicode) continue;
+    const cmap = font.tables?.cmap?.glyphIndexMap;
+    if (cmap && typeof cmap === "object") {
+      for (const [codeStr, glyphIndex] of Object.entries(cmap)) {
+        const code = Number(codeStr);
+        if (!Number.isFinite(code)) continue;
+        const glyph = font.glyphs.get(glyphIndex as number);
+        if (!glyph) continue;
 
-      const char = String.fromCharCode(glyph.unicode);
-      const path = glyph.getPath(0, 0, font.unitsPerEm);
-      const outline = this.pathToOutline(path, scale);
+        const path = glyph.getPath(0, 0, font.unitsPerEm);
+        const outline = this.pathToOutline(path, scale);
+        const advanceWidth = glyph.advanceWidth ?? glyph.xMax ?? font.unitsPerEm * 0.5;
+        const char = String.fromCharCode(code);
+        if (glyphs[char]) continue;
+        glyphs[char] = {
+          ha: Math.round(advanceWidth * scale),
+          x_min: glyph.xMin !== undefined ? Math.round(glyph.xMin * scale) : 0,
+          x_max: glyph.xMax !== undefined ? Math.round(glyph.xMax * scale) : 0,
+          o: outline,
+        };
+      }
+    } else {
+      for (let i = 0; i < font.glyphs.length; i++) {
+        const glyph = font.glyphs.get(i);
+        const unicodeValues = Array.isArray(glyph.unicodes)
+          ? glyph.unicodes
+          : glyph.unicode
+          ? [glyph.unicode]
+          : [];
+        if (unicodeValues.length === 0) continue;
 
-      const advanceWidth = glyph.advanceWidth ?? glyph.xMax ?? font.unitsPerEm * 0.5;
+        const path = glyph.getPath(0, 0, font.unitsPerEm);
+        const outline = this.pathToOutline(path, scale);
+        const advanceWidth = glyph.advanceWidth ?? glyph.xMax ?? font.unitsPerEm * 0.5;
 
-      glyphs[char] = {
-        ha: Math.round(advanceWidth * scale),
-        x_min: glyph.xMin !== undefined ? Math.round(glyph.xMin * scale) : 0,
-        x_max: glyph.xMax !== undefined ? Math.round(glyph.xMax * scale) : 0,
-        o: outline,
-      };
+        unicodeValues.forEach((code: number) => {
+          if (!Number.isFinite(code)) return;
+          const char = String.fromCharCode(code);
+          if (glyphs[char]) return;
+          glyphs[char] = {
+            ha: Math.round(advanceWidth * scale),
+            x_min: glyph.xMin !== undefined ? Math.round(glyph.xMin * scale) : 0,
+            x_max: glyph.xMax !== undefined ? Math.round(glyph.xMax * scale) : 0,
+            o: outline,
+          };
+        });
+      }
     }
 
     if (!glyphs[" "]) {
@@ -228,6 +259,7 @@ export class FontConverter {
         yMax: Math.round((font.tables.head?.yMax || 800) * scale),
       },
       resolution: 1000,
+      outlineFormat: (font.outlinesFormat || font.outlineFormat || "").toString(),
       original_font_information: {
         format: 0,
         copyright: font.names.copyright?.en || "",
@@ -278,7 +310,7 @@ export class FontConverter {
   }
 
   private static round(value: number): number {
-    return Math.round(value * 100) / 100;
+    return Math.round(value * 10000) / 10000;
   }
 
   static isTypefaceJson(url: string): boolean {
@@ -288,12 +320,11 @@ export class FontConverter {
 
   static isFontFile(url: string): boolean {
     const lower = url.toLowerCase();
-    return (
-      lower.endsWith(".ttf") ||
-      lower.endsWith(".otf") ||
-      lower.endsWith(".woff") ||
-      lower.endsWith(".woff2")
-    );
+    const fontExtensions = /\.(ttf|otf|woff2?)(\?|$)/i;
+    if (fontExtensions.test(lower)) return true;
+    if (lower.includes("fonts.gstatic.com")) return true;
+    if (lower.includes("/fonts/") && !lower.endsWith(".json")) return true;
+    return false;
   }
 
   static clearCache(): void {

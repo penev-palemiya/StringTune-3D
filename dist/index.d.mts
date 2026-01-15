@@ -1,4 +1,4 @@
-import { StringModule, StringContext, StringObject, StringData } from '@fiddle-digital/string-tune';
+import { StringObject, StringModule, StringContext, StringData } from '@fiddle-digital/string-tune';
 
 type UniformType = "float" | "int" | "vec2" | "vec3" | "vec4" | "color" | "texture" | "mat3" | "mat4";
 type UniformDefinition = {
@@ -6,7 +6,7 @@ type UniformDefinition = {
     value: any;
     css?: string;
 };
-type ShaderInjectionPoint = "vertex_pars" | "vertex_header" | "vertex_transform" | "vertex_output" | "fragment_pars" | "fragment_header" | "fragment_color" | "fragment_normal" | "fragment_emissive" | "fragment_output";
+type ShaderInjectionPoint = "vertex_pars" | "vertex_header" | "vertex_transform" | "vertex_output" | "fragment_pars" | "fragment_header" | "fragment_color" | "fragment_normal" | "fragment_emissive" | "fragment_roughness" | "fragment_metalness" | "fragment_ao" | "fragment_transmission" | "fragment_lights" | "fragment_output";
 type ShaderInjection = {
     point: ShaderInjectionPoint;
     code: string;
@@ -256,6 +256,8 @@ type TextGeometryOptions = {
         y: number;
         scale?: number;
     }>;
+    elementWidth?: number;
+    elementHeight?: number;
 };
 interface I3DModelLoader {
     load(url: string, onLoad?: (model: any) => void, onProgress?: (progress: any) => void, onError?: (error: any) => void): void;
@@ -300,91 +302,6 @@ interface I3DEngine {
     degToRad(degrees: number): number;
     radToDeg(radians: number): number;
     computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
-}
-
-interface I3DEngineProvider {
-    getEngine(): I3DEngine;
-    getName(): string;
-}
-
-interface String3DOptions {
-    hideHTML?: boolean;
-    container?: string | HTMLElement;
-    zIndex?: number;
-    modelLoaderType?: string;
-    modelLoader?: I3DModelLoader;
-    modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
-    useDirtySync?: boolean;
-    styleReadIntervalMs?: number;
-    layoutReadIntervalMs?: number;
-}
-declare class String3D extends StringModule {
-    private static provider;
-    private renderer;
-    private camera;
-    private scene;
-    private synchronizer;
-    private engine;
-    private canvasContainer;
-    private isLoading;
-    private options;
-    private useDirtySync;
-    private dirtySyncManager;
-    private lastSyncData;
-    private filterController;
-    private needsInitialResize;
-    static setProvider(provider: I3DEngineProvider): void;
-    static registerFont(name: string, url: string, options?: {
-        default?: boolean;
-    }): void;
-    static setDefaultFont(name: string): void;
-    constructor(context: StringContext);
-    canConnect(object: StringObject): boolean;
-    initializeObject(globalId: number, object: StringObject, element: HTMLElement, attributes: Record<string, any>): void;
-    onResize(): void;
-    onInit(): void;
-    onSettingsChange(): void;
-    private buildOptionsFromSettings;
-    private getSettingValue;
-    private resolveModelLoader;
-    private resolveModelLoaderFactory;
-    private createOrGetContainer;
-    private applyContainerStyles;
-    onObjectConnected(object: StringObject): void;
-    onFrame(data: StringData): void;
-    private batchReadLayouts;
-    private syncRecursive;
-    private injectCSS;
-    private registerTypedProperties;
-    destroy(): void;
-}
-
-type CameraMode = "orthographic" | "perspective";
-declare class String3DCamera {
-    private scaleCache;
-    private _camera;
-    private _position;
-    private _width;
-    private _height;
-    private engine;
-    private mode;
-    private perspectiveFov;
-    constructor(engine: I3DEngine, mode?: CameraMode, fov?: number, near?: number, far?: number);
-    get camera(): I3DCamera;
-    resize(width: number, height: number): void;
-    setPosition(x: number, y: number, z: number): void;
-    lookAt(x: number, y: number, z: number): void;
-    update(): void;
-    screenToWorld(screenX: number, screenY: number, z?: number): I3DVector3;
-    getFrustumSizeAt(z: number): {
-        width: number;
-        height: number;
-    };
-    getScaleAtZ(z: number, viewportHeight: number): number;
-    clearScaleCache(): void;
-    getMode(): CameraMode;
-    getPerspectiveFov(): number;
-    getPositionZ(): number;
 }
 
 declare class String3DObject {
@@ -439,6 +356,55 @@ declare class String3DObject {
     private disposeObjectResources;
 }
 
+type CameraMode = "orthographic" | "perspective";
+declare class String3DCamera {
+    private scaleCache;
+    private _camera;
+    private _position;
+    private _width;
+    private _height;
+    private engine;
+    private mode;
+    private perspectiveFov;
+    constructor(engine: I3DEngine, mode?: CameraMode, fov?: number, near?: number, far?: number);
+    get camera(): I3DCamera;
+    resize(width: number, height: number): void;
+    setPosition(x: number, y: number, z: number): void;
+    lookAt(x: number, y: number, z: number): void;
+    update(): void;
+    screenToWorld(screenX: number, screenY: number, z?: number): I3DVector3;
+    getFrustumSizeAt(z: number): {
+        width: number;
+        height: number;
+    };
+    getScaleAtZ(z: number, viewportHeight: number): number;
+    clearScaleCache(): void;
+    getMode(): CameraMode;
+    getPerspectiveFov(): number;
+    getPositionZ(): number;
+}
+
+declare class String3DSynchronizer {
+    camera: String3DCamera;
+    viewportWidth: number;
+    viewportHeight: number;
+    engine: I3DEngine;
+    private strategies;
+    private styleReadIntervalMs;
+    private layoutReadIntervalMs;
+    constructor(camera: String3DCamera, viewportWidth: number, viewportHeight: number, engine: I3DEngine);
+    syncElement(el: HTMLElement, object: String3DObject, parentData: any, hints?: {
+        dirtySet?: Set<HTMLElement> | null;
+        forceSync?: boolean;
+    }): any;
+    setSyncOptions(options: {
+        styleReadIntervalMs?: number;
+        layoutReadIntervalMs?: number;
+    }): void;
+    updateViewportSize(width: number, height: number): void;
+    cleanupElement(el: HTMLElement, object: String3DObject): void;
+}
+
 interface String3DSceneOptions {
     modelLoader?: I3DModelLoader;
     modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
@@ -453,10 +419,13 @@ declare class String3DScene {
     private _modelLoader?;
     private _modelLoaderFactory?;
     private _modelLoaderCache;
+    private _synchronizer?;
     get rootObjects(): String3DObject[];
     constructor(engine: I3DEngine, options?: String3DSceneOptions);
+    setSynchronizer(synchronizer: String3DSynchronizer): void;
     getScene(): I3DScene;
     getObject(id: string): String3DObject | undefined;
+    getObjectForElement(element: HTMLElement): String3DObject | undefined;
     getAllObjects(): String3DObject[];
     hasObject(id: string): boolean;
     deleteObject(id: string): boolean;
@@ -480,10 +449,71 @@ declare class String3DScene {
     private tryCreateCustomMaterial;
     updateMaterialUniforms(objectId: string, uniforms: Record<string, any>): void;
     getMaterialInstance(objectId: string): IMaterialInstance | undefined;
+    recreateMaterialForObject(object: String3DObject, element: HTMLElement | null): void;
     private loadTexture;
     private parseFlipY;
     private shouldOverrideModelMaterial;
     private applyModelTextureRemap;
+    destroy(): void;
+}
+
+interface I3DEngineProvider {
+    getEngine(): I3DEngine;
+    getName(): string;
+}
+
+interface String3DOptions {
+    hideHTML?: boolean;
+    container?: string | HTMLElement;
+    zIndex?: number;
+    modelLoaderType?: string;
+    modelLoader?: I3DModelLoader;
+    modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
+    useDirtySync?: boolean;
+    styleReadIntervalMs?: number;
+    layoutReadIntervalMs?: number;
+}
+declare class String3D extends StringModule {
+    private static provider;
+    private static _instance;
+    private renderer;
+    private camera;
+    private _scene;
+    private synchronizer;
+    private engine;
+    private canvasContainer;
+    private isLoading;
+    private options;
+    private useDirtySync;
+    private dirtySyncManager;
+    private lastSyncData;
+    private filterController;
+    private needsInitialResize;
+    static getInstance(): String3D | null;
+    get scene(): String3DScene | null;
+    static setProvider(provider: I3DEngineProvider): void;
+    static registerFont(name: string, url: string, options?: {
+        default?: boolean;
+    }): void;
+    static setDefaultFont(name: string): void;
+    constructor(context: StringContext);
+    canConnect(object: StringObject): boolean;
+    initializeObject(globalId: number, object: StringObject, element: HTMLElement, attributes: Record<string, any>): void;
+    onResize(): void;
+    onInit(): void;
+    onSettingsChange(): void;
+    private buildOptionsFromSettings;
+    private getSettingValue;
+    private resolveModelLoader;
+    private resolveModelLoaderFactory;
+    private createOrGetContainer;
+    private applyContainerStyles;
+    onObjectConnected(object: StringObject): void;
+    onFrame(data: StringData): void;
+    private batchReadLayouts;
+    private syncRecursive;
+    private injectCSS;
+    private registerTypedProperties;
     destroy(): void;
 }
 
@@ -570,26 +600,6 @@ declare class String3DRenderer {
     private restoreCameraLayer;
 }
 
-declare class String3DSynchronizer {
-    camera: String3DCamera;
-    viewportWidth: number;
-    viewportHeight: number;
-    engine: I3DEngine;
-    private strategies;
-    private styleReadIntervalMs;
-    private layoutReadIntervalMs;
-    constructor(camera: String3DCamera, viewportWidth: number, viewportHeight: number, engine: I3DEngine);
-    syncElement(el: HTMLElement, object: String3DObject, parentData: any, hints?: {
-        dirtySet?: Set<HTMLElement> | null;
-        forceSync?: boolean;
-    }): any;
-    setSyncOptions(options: {
-        styleReadIntervalMs?: number;
-        layoutReadIntervalMs?: number;
-    }): void;
-    updateViewportSize(width: number, height: number): void;
-}
-
 type String3DCustomFilterDefinition = {
     name: string;
     fragmentShader: string;
@@ -611,6 +621,7 @@ type String3DFontEntry = {
 declare class String3DFontRegistry {
     private static fonts;
     private static defaultFont;
+    private static normalizeKey;
     static register(name: string, url: string): void;
     static setDefault(name: string): void;
     static get(name: string): String3DFontEntry | undefined;
@@ -633,6 +644,7 @@ interface FontData {
         yMax: number;
     };
     resolution: number;
+    outlineFormat: string;
     original_font_information: Record<string, any>;
 }
 interface GlyphData {
@@ -704,6 +716,11 @@ declare class ThreeJSEngine implements I3DEngine {
     private generateShapesFromFontData;
     private getOutlineXMin;
     private getOutlineXMax;
+    private getOutlineYMin;
+    private pointInPolygon;
+    private samplePathPoints;
+    private getBoundingBox;
+    private getInteriorPoint;
     private parseOutlineToShapes;
     private reversePath;
     createTextGeometry(text: string, font: any, options: any): I3DGeometry | null;

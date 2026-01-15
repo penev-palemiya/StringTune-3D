@@ -28,10 +28,11 @@ export interface String3DOptions {
 
 export class String3D extends StringModule {
   private static provider: I3DEngineProvider | null = null;
+  private static _instance: String3D | null = null;
 
   private renderer: String3DRenderer | null = null;
   private camera: String3DCamera | null = null;
-  private scene: String3DScene | null = null;
+  private _scene: String3DScene | null = null;
   private synchronizer: String3DSynchronizer | null = null;
   private engine: I3DEngine | null = null;
   private canvasContainer: HTMLElement | null = null;
@@ -42,6 +43,14 @@ export class String3D extends StringModule {
   private lastSyncData: WeakMap<String3DObject, { scale: number }> = new WeakMap();
   private filterController: FilterController;
   private needsInitialResize = true;
+
+  public static getInstance(): String3D | null {
+    return String3D._instance;
+  }
+
+  public get scene(): String3DScene | null {
+    return this._scene;
+  }
 
   public static setProvider(provider: I3DEngineProvider): void {
     String3D.provider = provider;
@@ -85,6 +94,8 @@ export class String3D extends StringModule {
       { key: "3d-model-center", type: "boolean", fallback: false },
       { key: "3d-model-fit", type: "string", fallback: "contain" },
     ];
+
+    String3D._instance = this;
   }
 
   override canConnect(object: StringObject): boolean {
@@ -147,11 +158,11 @@ export class String3D extends StringModule {
 
     const modelLoader = this.resolveModelLoader();
     const modelLoaderFactory = this.resolveModelLoaderFactory();
-    this.scene = new String3DScene(this.engine, {
+    this._scene = new String3DScene(this.engine, {
       modelLoader,
       modelLoaderFactory,
     });
-    this.scene.getScene().add(this.camera.camera);
+    this._scene.getScene().add(this.camera.camera);
 
     this.synchronizer = new String3DSynchronizer(
       this.camera,
@@ -164,7 +175,7 @@ export class String3D extends StringModule {
       layoutReadIntervalMs: this.options.layoutReadIntervalMs,
     });
 
-    console.info(`[String3D] Initialized with: ${String3D.provider.getName()}`);
+    this._scene.setSynchronizer(this.synchronizer);
   }
 
   override onSettingsChange(): void {
@@ -173,8 +184,8 @@ export class String3D extends StringModule {
     if (shouldUseDirtySync && !this.useDirtySync) {
       this.useDirtySync = true;
       this.dirtySyncManager.enable();
-      if (this.scene) {
-        this.dirtySyncManager.observeScene(this.scene.rootObjects);
+      if (this._scene) {
+        this.dirtySyncManager.observeScene(this._scene.rootObjects);
       }
       this.dirtySyncManager.markAllDirty();
     } else if (!shouldUseDirtySync && this.useDirtySync) {
@@ -270,10 +281,12 @@ export class String3D extends StringModule {
   }
 
   override onObjectConnected(object: StringObject): void {
-    if (this.isLoading.has(object.id) || !this.scene) return;
+    if (this.isLoading.has(object.id) || !this._scene) {
+      return;
+    }
     this.isLoading.set(object.id, true);
 
-    this.scene.createFromElement(object);
+    this._scene.createFromElement(object);
 
     if (this.useDirtySync && object.htmlElement) {
       this.dirtySyncManager.observeElement(object.htmlElement);
@@ -287,7 +300,7 @@ export class String3D extends StringModule {
   }
 
   override onFrame(data: StringData): void {
-    if (!this.renderer || !this.scene || !this.camera || !this.synchronizer) return;
+    if (!this.renderer || !this._scene || !this.camera || !this.synchronizer) return;
 
     if (this.needsInitialResize) {
       this.needsInitialResize = false;
@@ -298,19 +311,19 @@ export class String3D extends StringModule {
     const dirtySet = this.useDirtySync ? this.dirtySyncManager.getDirtySet() : null;
     const forceSync = !dirtySet || dirtySet.size === 0;
 
-    this.batchReadLayouts(this.scene.rootObjects, forceSync, dirtySet);
+    this.batchReadLayouts(this._scene.rootObjects, forceSync, dirtySet);
 
-    this.scene.rootObjects.forEach((obj) => {
+    this._scene.rootObjects.forEach((obj) => {
       this.syncRecursive(obj.el, obj, { scale: 1 }, forceSync, dirtySet);
     });
 
     const filterTargets = this.filterController.collectTargets(
-      this.scene.rootObjects,
+      this._scene.rootObjects,
       performance.now(),
       this.useDirtySync,
       dirtySet
     );
-    this.renderer!.render(this.scene!, this.camera!, filterTargets);
+    this.renderer!.render(this._scene!, this.camera!, filterTargets);
 
     if (this.useDirtySync) {
       this.dirtySyncManager.clearDirty();
@@ -611,7 +624,7 @@ export class String3D extends StringModule {
 
   override destroy(): void {
     this.renderer?.destroy();
-    this.scene?.destroy();
+    this._scene?.destroy();
     this.isLoading.clear();
     this.dirtySyncManager.disable();
     this.filterController.clear();

@@ -25,6 +25,11 @@ export type ShaderInjectionPoint =
   | "fragment_color"
   | "fragment_normal"
   | "fragment_emissive"
+  | "fragment_roughness"
+  | "fragment_metalness"
+  | "fragment_ao"
+  | "fragment_transmission"
+  | "fragment_lights"
   | "fragment_output";
 
 export type ShaderInjection = {

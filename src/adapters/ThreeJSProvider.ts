@@ -252,8 +252,17 @@ export class ThreeJSEngine implements I3DEngine {
   }
 
   private createFontFromData(fontData: any): any {
+    const LoaderClass = this.loaders.font || this.loaders.FontLoader;
+    if (LoaderClass && LoaderClass.utils && LoaderClass.utils.convert) {
+      const loader = new LoaderClass();
+      if (loader.parse) {
+        return loader.parse(fontData);
+      }
+    }
+
     const font = {
       data: fontData,
+      isFont: true,
       generateShapes: (text: string, size: number) => {
         return this.generateShapesFromFontData(fontData, text, size, false);
       },
@@ -285,7 +294,7 @@ export class ThreeJSEngine implements I3DEngine {
       xOffset = -xMin * scale;
     }
 
-    const charShapes = this.parseOutlineToShapes(glyph.o, scale, xOffset);
+    const charShapes = this.parseOutlineToShapes(glyph.o, scale, xOffset, fontData?.outlineFormat);
     shapes.push(...charShapes);
 
     return shapes;
@@ -357,17 +366,117 @@ export class ThreeJSEngine implements I3DEngine {
     return maxX === -Infinity ? 0 : maxX;
   }
 
-  private parseOutlineToShapes(outline: string, scale: number, offsetX: number = 0): any[] {
+  private getOutlineYMin(outline: string): number {
+    const commands = outline.split(" ");
+    let minY = Infinity;
+    let i = 0;
+
+    while (i < commands.length) {
+      const cmd = commands[i];
+      switch (cmd) {
+        case "m":
+        case "l":
+          minY = Math.min(minY, parseFloat(commands[i + 2]) || 0);
+          i += 3;
+          break;
+        case "q":
+          minY = Math.min(minY, parseFloat(commands[i + 2]) || 0);
+          minY = Math.min(minY, parseFloat(commands[i + 4]) || 0);
+          i += 5;
+          break;
+        case "b":
+          minY = Math.min(minY, parseFloat(commands[i + 2]) || 0);
+          minY = Math.min(minY, parseFloat(commands[i + 4]) || 0);
+          minY = Math.min(minY, parseFloat(commands[i + 6]) || 0);
+          i += 7;
+          break;
+        default:
+          i++;
+          break;
+      }
+    }
+
+    return minY === Infinity ? 0 : minY;
+  }
+
+  private pointInPolygon(
+    px: number,
+    py: number,
+    polygon: Array<{ x: number; y: number }>
+  ): boolean {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x;
+      const yi = polygon[i].y;
+      const xj = polygon[j].x;
+      const yj = polygon[j].y;
+
+      if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  private samplePathPoints(path: any, numSamples: number = 80): Array<{ x: number; y: number }> {
+    if (!path?.getPoints) return [];
+    return path.getPoints(numSamples).map((p: any) => ({ x: p.x, y: p.y }));
+  }
+
+  private getBoundingBox(points: Array<{ x: number; y: number }>): {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    area: number;
+  } {
+    if (points.length === 0) {
+      return { minX: 0, maxX: 0, minY: 0, maxY: 0, area: 0 };
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, maxX, minY, maxY, area: (maxX - minX) * (maxY - minY) };
+  }
+
+  private getInteriorPoint(points: Array<{ x: number; y: number }>): { x: number; y: number } {
+    if (points.length < 3) return points[0] || { x: 0, y: 0 };
+    const contour = points.map((p) => new this.THREE.Vector2(p.x, p.y));
+    const triangles = this.THREE.ShapeUtils.triangulateShape(contour, []);
+    for (const tri of triangles) {
+      const a = contour[tri[0]];
+      const b = contour[tri[1]];
+      const c = contour[tri[2]];
+      const cx = (a.x + b.x + c.x) / 3;
+      const cy = (a.y + b.y + c.y) / 3;
+      if (this.pointInPolygon(cx, cy, points)) {
+        return { x: cx, y: cy };
+      }
+    }
+    return points[0];
+  }
+
+  private parseOutlineToShapes(
+    outline: string,
+    scale: number,
+    offsetX: number = 0,
+    outlineFormat?: string
+  ): any[] {
     if (!outline) return [];
 
     const shapePath = new this.THREE.ShapePath();
-
     const commands = outline.split(" ");
     let i = 0;
 
     while (i < commands.length) {
       const cmd = commands[i];
-
       switch (cmd) {
         case "m":
           {
@@ -377,7 +486,6 @@ export class ThreeJSEngine implements I3DEngine {
             i += 3;
           }
           break;
-
         case "l":
           {
             const lx = parseFloat(commands[i + 1]) * scale + offsetX;
@@ -386,7 +494,6 @@ export class ThreeJSEngine implements I3DEngine {
             i += 3;
           }
           break;
-
         case "q":
           {
             const qx = parseFloat(commands[i + 3]) * scale + offsetX;
@@ -400,7 +507,6 @@ export class ThreeJSEngine implements I3DEngine {
             i += 5;
           }
           break;
-
         case "b":
           {
             const bx = parseFloat(commands[i + 5]) * scale + offsetX;
@@ -429,15 +535,84 @@ export class ThreeJSEngine implements I3DEngine {
             i += 1;
           }
           break;
-
         default:
           i++;
           break;
       }
     }
 
-    const shapes = shapePath.toShapes(false);
-    return shapes;
+    const subPaths = shapePath.subPaths;
+    if (!subPaths || subPaths.length === 0) return [];
+
+    const paths = subPaths.map((sp: any) => {
+      const points = sp.getPoints();
+      const area = this.THREE.ShapeUtils.area(points);
+      const bbox = this.getBoundingBox(points.map((p: any) => ({ x: p.x, y: p.y })));
+      return {
+        path: sp,
+        points,
+        area: Math.abs(area),
+        signedArea: area,
+        bbox,
+      };
+    });
+
+    paths.sort((a: any, b: any) => b.area - a.area);
+
+    const finalShapes: any[] = [];
+    const used = new Set<number>();
+
+    for (let i = 0; i < paths.length; i++) {
+      if (used.has(i)) continue;
+
+      const outerPath = paths[i];
+      const shape = new this.THREE.Shape(outerPath.points);
+      used.add(i);
+
+      for (let j = 0; j < paths.length; j++) {
+        if (used.has(j) || i === j) continue;
+
+        const innerPath = paths[j];
+
+        if (
+          innerPath.bbox.minX < outerPath.bbox.minX ||
+          innerPath.bbox.maxX > outerPath.bbox.maxX ||
+          innerPath.bbox.minY < outerPath.bbox.minY ||
+          innerPath.bbox.maxY > outerPath.bbox.maxY
+        ) {
+          continue;
+        }
+
+        let allPointsInside = true;
+        const testPoints = [
+          innerPath.points[0],
+          innerPath.points[Math.floor(innerPath.points.length / 2)],
+        ];
+
+        for (const testPoint of testPoints) {
+          if (
+            !testPoint ||
+            !this.pointInPolygon(
+              testPoint.x,
+              testPoint.y,
+              outerPath.points.map((p: any) => ({ x: p.x, y: p.y }))
+            )
+          ) {
+            allPointsInside = false;
+            break;
+          }
+        }
+
+        if (allPointsInside) {
+          shape.holes.push(new this.THREE.Path(innerPath.points));
+          used.add(j);
+        }
+      }
+
+      finalShapes.push(shape);
+    }
+
+    return finalShapes.length > 0 ? finalShapes : shapePath.toShapes(true);
   }
 
   private reversePath(path: any): any {
@@ -500,16 +675,25 @@ export class ThreeJSEngine implements I3DEngine {
 
     const fontData = font?.data;
     const resolution = fontData?.resolution || 1000;
-    const ascender = fontData?.ascender || 800;
-    const descender = fontData?.descender || -200;
-    const fontScale = size / resolution;
-    const fontAscent = ascender * fontScale;
-
     if (options.layout && options.layout.length > 0) {
+      const fontAscender = fontData?.ascender || resolution * 0.8;
+      const fontDescender = fontData?.descender || -resolution * 0.2;
+      const fontEmHeight = fontAscender - fontDescender;
+      const baselineRatio = fontAscender / fontEmHeight;
+
+      const elementWidth = options.elementWidth || 0;
+      const elementHeight = options.elementHeight || 0;
+      const centerOffsetX = 0;
+      const centerOffsetY = 0;
+
       options.layout.forEach((item: any) => {
         const charShapes = font.generateShapes(item.char, size);
-        const offsetX = item.x;
-        const offsetY = -item.y;
+
+        const offsetX = item.x + centerOffsetX;
+
+        const charHeight = item.height || size;
+        const baselineFromTop = charHeight * baselineRatio;
+        const offsetY = -(item.y + centerOffsetY) - baselineFromTop;
 
         charShapes.forEach((shape: any) => {
           let finalShape = this.translateShape(shape, offsetX, offsetY);

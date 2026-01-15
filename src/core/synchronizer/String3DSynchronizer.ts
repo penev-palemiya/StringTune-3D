@@ -74,4 +74,11 @@ export class String3DSynchronizer {
     this.viewportWidth = width;
     this.viewportHeight = height;
   }
+
+  public cleanupElement(el: HTMLElement, object: String3DObject): void {
+    const strategy = this.strategies.get(object.type);
+    if (strategy?.cleanup) {
+      strategy.cleanup(el, object);
+    }
+  }
 }

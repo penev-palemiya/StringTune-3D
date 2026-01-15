@@ -209,6 +209,8 @@ export type TextGeometryOptions = {
   letterSpacing: number;
   align: "left" | "center" | "right";
   layout?: Array<{ char: string; x: number; y: number; scale?: number }>;
+  elementWidth?: number;
+  elementHeight?: number;
 };
 
 export interface I3DModelLoader {

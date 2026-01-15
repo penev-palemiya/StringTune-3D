@@ -7,20 +7,24 @@ export class String3DFontRegistry {
   private static fonts: Map<string, String3DFontEntry> = new Map();
   private static defaultFont: string | null = null;
 
+  private static normalizeKey(name: string): string {
+    return name.trim().toLowerCase();
+  }
+
   static register(name: string, url: string): void {
     const normalized = name.trim();
     if (!normalized) return;
-    this.fonts.set(normalized, { name: normalized, url });
+    this.fonts.set(this.normalizeKey(normalized), { name: normalized, url });
   }
 
   static setDefault(name: string): void {
     const normalized = name.trim();
     if (!normalized) return;
-    this.defaultFont = normalized;
+    this.defaultFont = this.normalizeKey(normalized);
   }
 
   static get(name: string): String3DFontEntry | undefined {
-    return this.fonts.get(name.trim());
+    return this.fonts.get(this.normalizeKey(name));
   }
 
   static list(): String3DFontEntry[] {
@@ -38,7 +42,7 @@ export class String3DFontRegistry {
       .filter(Boolean);
 
     for (const family of families) {
-      const entry = this.fonts.get(family);
+      const entry = this.fonts.get(this.normalizeKey(family));
       if (entry) return entry;
     }
 

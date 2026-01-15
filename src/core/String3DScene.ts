@@ -10,6 +10,7 @@ import { String3DObject } from "./String3DObject";
 import { StringObject } from "@fiddle-digital/string-tune";
 import { readBooleanStyle, readNumberStyle, readStringStyle } from "../modules/string3d/styleUtils";
 import { String3DCustomMaterialRegistry, IMaterialInstance } from "./materials";
+import type { String3DSynchronizer } from "./synchronizer/String3DSynchronizer";
 
 export interface String3DSceneOptions {
   modelLoader?: I3DModelLoader;
@@ -26,6 +27,7 @@ export class String3DScene {
   private _modelLoader?: I3DModelLoader;
   private _modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
   private _modelLoaderCache: Map<string, I3DModelLoader> = new Map();
+  private _synchronizer?: String3DSynchronizer;
 
   public get rootObjects(): String3DObject[] {
     return this._rootObjects;
@@ -38,12 +40,25 @@ export class String3DScene {
     this._scene = engine.createScene();
   }
 
+  public setSynchronizer(synchronizer: String3DSynchronizer): void {
+    this._synchronizer = synchronizer;
+  }
+
   public getScene(): I3DScene {
     return this._scene;
   }
 
   public getObject(id: string): String3DObject | undefined {
     return this._objects.get(id);
+  }
+
+  public getObjectForElement(element: HTMLElement): String3DObject | undefined {
+    for (const [id, el] of this._elementMap) {
+      if (el === element) {
+        return this._objects.get(id);
+      }
+    }
+    return undefined;
   }
 
   public getAllObjects(): String3DObject[] {
@@ -63,6 +78,11 @@ export class String3DScene {
   public deleteObject(id: string): boolean {
     const obj = this._objects.get(id);
     if (obj) {
+      const element = this._elementMap.get(id);
+      if (element && this._synchronizer) {
+        this._synchronizer.cleanupElement(element, obj);
+      }
+
       this._scene.remove(obj.object);
       this._objects.delete(id);
       this._elementMap.delete(id);
@@ -551,6 +571,37 @@ export class String3DScene {
 
   public getMaterialInstance(objectId: string): IMaterialInstance | undefined {
     return this._materialInstances.get(objectId);
+  }
+
+  public recreateMaterialForObject(object: String3DObject, element: HTMLElement | null): void {
+    const oldInstance = this._materialInstances.get(object.id);
+    if (oldInstance && oldInstance.dispose) {
+      oldInstance.dispose();
+    }
+    this._materialInstances.delete(object.id);
+
+    let stringObject: StringObject | undefined;
+    for (const [id, el] of this._elementMap) {
+      if (id === object.id && el === element) {
+        stringObject = (el as any).__stringObject || (el as any).stringObject;
+        break;
+      }
+    }
+
+    const newMaterial = this.createMaterialFromElement(element, stringObject);
+
+    if (object.object && object.object.traverse) {
+      object.object.traverse((child: any) => {
+        if (child.material) {
+          if (child.material.dispose) {
+            child.material.dispose();
+          }
+          child.material = newMaterial;
+        }
+      });
+    }
+
+    object.material = newMaterial;
   }
 
   private loadTexture(src: string, options: { flipY?: boolean; colorSpace?: string } = {}): any {

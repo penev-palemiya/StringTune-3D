@@ -240,6 +240,43 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
       );
     }
 
+    const roughness = injections.get("fragment_roughness");
+    if (roughness) {
+      result = result.replace(
+        "#include <roughnessmap_fragment>",
+        `#include <roughnessmap_fragment>\n${roughness}`
+      );
+    }
+
+    const metalness = injections.get("fragment_metalness");
+    if (metalness) {
+      result = result.replace(
+        "#include <metalnessmap_fragment>",
+        `#include <metalnessmap_fragment>\n${metalness}`
+      );
+    }
+
+    const ao = injections.get("fragment_ao");
+    if (ao) {
+      result = result.replace("#include <aomap_fragment>", `#include <aomap_fragment>\n${ao}`);
+    }
+
+    const transmission = injections.get("fragment_transmission");
+    if (transmission) {
+      result = result.replace(
+        "#include <transmission_fragment>",
+        `#include <transmission_fragment>\n${transmission}`
+      );
+    }
+
+    const lights = injections.get("fragment_lights");
+    if (lights) {
+      result = result.replace(
+        "#include <lights_physical_fragment>",
+        `#include <lights_physical_fragment>\n${lights}`
+      );
+    }
+
     const emissive = injections.get("fragment_emissive");
     if (emissive) {
       result = result.replace(

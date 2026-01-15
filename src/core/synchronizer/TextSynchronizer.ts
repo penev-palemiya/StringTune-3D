@@ -43,9 +43,11 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
   private static styleCache = new StyleBundleCache<StyleBundle>();
   private static layoutCache = new StyleBundleCache<LayoutBundle>();
   private static geometryKeys: WeakMap<String3DObject, string> = new WeakMap();
+  private static lastMaterialType: WeakMap<String3DObject, string> = new WeakMap();
   private static fontCache: Map<string, any> = new Map();
   private static fontPromises: Map<string, Promise<any>> = new Map();
   private static pendingFontObjects: Map<string, Set<String3DObject>> = new Map();
+  private static contentObservers: WeakMap<HTMLElement, MutationObserver> = new WeakMap();
   private static warnedMissingFont = false;
   private static warnedMissingLoader = false;
   private static pseudoStyleInjected = false;
@@ -57,7 +59,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       this.pendingFontObjects.set(fontUrl, set);
     }
     set.add(object);
-    this.log(`Marked object ${object.id} as pending font: ${fontUrl}`);
   }
 
   private static clearObjectPendingFont(fontUrl: string, object: String3DObject): void {
@@ -70,7 +71,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
   private static invalidatePendingObjects(fontUrl: string): void {
     const set = this.pendingFontObjects.get(fontUrl);
     if (set) {
-      this.log(`Font loaded: ${fontUrl}, invalidating ${set.size} pending objects`);
       set.forEach((obj) => {
         this.geometryKeys.delete(obj);
       });
@@ -123,9 +123,53 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     el.style.setProperty("--string3d-transform", transform || "none");
   }
 
+  private static setupContentObserver(el: HTMLElement, object: String3DObject): void {
+    if (this.contentObservers.has(el)) return;
+
+    let lastContent = el.textContent || "";
+
+    const observer = new MutationObserver((mutations) => {
+      const currentContent = el.textContent || "";
+      if (currentContent === lastContent) {
+        return;
+      }
+
+      lastContent = currentContent;
+
+      const string3d = (window as any).StringTune3D?.String3D?.getInstance?.();
+      const currentObject = string3d?.scene?.getObjectForElement?.(el);
+
+      if (currentObject) {
+        this.geometryKeys.delete(currentObject);
+        this.layoutCache.invalidate(el);
+
+        if (el.dataset.string3dText !== currentContent) {
+          el.dataset.string3dText = currentContent;
+        }
+      }
+    });
+
+    observer.observe(el, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+
+    this.contentObservers.set(el, observer);
+  }
+
+  private static cleanupContentObserver(el: HTMLElement): void {
+    const observer = this.contentObservers.get(el);
+    if (observer) {
+      observer.disconnect();
+      this.contentObservers.delete(el);
+    }
+  }
+
   sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any {
     TextSynchronizer.injectPseudoElementStyles();
     TextSynchronizer.setupSelectableText(el);
+    TextSynchronizer.setupContentObserver(el, object);
 
     const { rect, width: originalWidth, height: originalHeight } = this.readLayout(el, ctx);
     const bundle = this.readStyleBundle(el, ctx);
@@ -144,6 +188,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       emissive,
       castShadow,
       receiveShadow,
+      materialType,
       fontFamily,
       fontSize,
       textTransform,
@@ -191,15 +236,20 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
     const mesh = this.getTextMesh(object);
     if (!mesh) {
-      TextSynchronizer.log("No mesh found for text object");
       return { scale: cssScale * (parentData?.scale || 1) };
     }
 
     if (layout.length === 0) {
-      TextSynchronizer.log("Empty text content, hiding mesh");
       mesh.visible = false;
       return { scale: cssScale * (parentData?.scale || 1) };
     }
+
+    if (opacity === 0) {
+      object.object.visible = false;
+      return { scale: cssScale * (parentData?.scale || 1) };
+    }
+    object.object.visible = true;
+
     mesh.visible = true;
 
     const fontEntry = String3DFontRegistry.resolveFontFamily(fontFamily || "");
@@ -207,7 +257,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       if (!TextSynchronizer.warnedMissingFont) {
         TextSynchronizer.warnedMissingFont = true;
       }
-      return { scale: cssScale * (parentData?.scale || 1) };
       return { scale: cssScale * (parentData?.scale || 1) };
     }
 
@@ -263,21 +312,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
     const prevKey = TextSynchronizer.geometryKeys.get(object);
     if (prevKey !== key) {
-      TextSynchronizer.log(
-        "Creating new geometry for",
-        textContent.substring(0, 20),
-        "Layout:",
-        layoutSig
-      );
-
-      const metrics = TextSynchronizer.getFontMetrics(font, fontSize);
-      const ascent = metrics ? metrics.ascent : fontSize * 0.8;
-
-      const adjustedLayout = layout.map((item) => ({
-        ...item,
-        y: item.y + ascent,
-      }));
-
       const geometry = ctx.engine.createTextGeometry(textContent, font, {
         size: fontSize,
         height: textDepth,
@@ -290,7 +324,9 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         lineHeight: 0,
         letterSpacing: 0,
         align: "left",
-        layout: adjustedLayout,
+        layout,
+        elementWidth: rect.width,
+        elementHeight: rect.height,
       });
 
       if (geometry) {
@@ -320,6 +356,19 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
     mesh.position.set(localOffsetX, localOffsetY, 0);
 
+    const prevMaterialType = TextSynchronizer.lastMaterialType.get(object);
+    if (prevMaterialType !== undefined && prevMaterialType !== materialType) {
+      if (ctx.scene && (ctx.scene as any).recreateMaterialForObject) {
+        requestAnimationFrame(() => {
+          if (ctx.scene && (ctx.scene as any).recreateMaterialForObject) {
+            (ctx.scene as any).recreateMaterialForObject(object, el);
+          }
+        });
+      }
+    }
+
+    TextSynchronizer.lastMaterialType.set(object, materialType);
+
     MeshSynchronizer.applyVisualProps(el, object, {
       opacity,
       color: color && color !== "none" ? color : undefined,
@@ -333,6 +382,11 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     this.updateCustomUniforms(el, object, ctx);
 
     return { scale: scaleFactor };
+  }
+
+  cleanup(el: HTMLElement, object: String3DObject): void {
+    TextSynchronizer.cleanupContentObserver(el);
+    TextSynchronizer.geometryKeys.delete(object);
   }
 
   private extractCharacterLayout(
@@ -559,6 +613,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         emissive: readString("--material-emissive"),
         castShadow: readBool("--shadow-cast", false),
         receiveShadow: readBool("--shadow-receive", false),
+        materialType: readString("--material-type", "basic").split("[")[0] || "basic",
         fontFamily: style.fontFamily || "",
         fontCss: computedFont,
         fontSize,
@@ -588,22 +643,6 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     return text;
   }
 
-  private static getFontMetrics(
-    font: any,
-    fontSize: number
-  ): { ascent: number; descent: number } | null {
-    const data = font?.data;
-    const resolution = Number(data?.resolution);
-    const ascender = Number(data?.ascender);
-    const descender = Number(data?.descender);
-    if (!Number.isFinite(resolution) || resolution <= 0) return null;
-    if (!Number.isFinite(ascender) || !Number.isFinite(descender)) return null;
-    const ascent = (ascender / resolution) * fontSize;
-    const descent = (Math.abs(descender) / resolution) * fontSize;
-    if (!Number.isFinite(ascent) || !Number.isFinite(descent)) return null;
-    return { ascent, descent };
-  }
-
   private readLayout(el: HTMLElement, ctx: SyncContext): LayoutBundle {
     const cached = (el as any).__layoutCache;
     if (cached) {
@@ -631,6 +670,7 @@ type StyleBundle = {
   emissive: string;
   castShadow: boolean;
   receiveShadow: boolean;
+  materialType: string;
   fontFamily: string;
   fontCss: string;
   fontSize: number;
