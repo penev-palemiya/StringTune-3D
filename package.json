@@ -1,6 +1,6 @@
 {
   "name": "string-tune-3d",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "CSS-driven 3D graphics library that lets you control Three.js objects through CSS custom properties.",
   "keywords": [
     "3d",
@@ -45,7 +45,7 @@
     ".": {
       "require": "./dist/index.cjs",
       "import": "./dist/index.mjs",
-      "default": "./dist/index.js"
+      "default": "./dist/index.cjs"
     }
   },
   "scripts": {
