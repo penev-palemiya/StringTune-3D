@@ -21,6 +21,16 @@
   <a href="#examples">Examples</a>
 </p>
 
+## Live Examples
+
+| Demo                        | What it shows                                                             | Open                                                                        |
+| --------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 🌟 **Particles Playground** | Emitter + instanced particles, motion tuning, and visual density controls | [Launch](https://codesandbox.io/p/sandbox/ycqkng)                           |
+| ✨ **Filters Playground**   | Full filter list, chaining effects, and post-process styling patterns     | [Launch](https://codesandbox.io/p/sandbox/stringtune-3d-filter-list-4v2z5q) |
+| 🔤 **3D Text Playground**   | Font setup, extrusion/bevel controls, and text styling workflow           | [Launch](https://codesandbox.io/p/sandbox/stringtune-3d-text-svqvlq)        |
+
+> Tip: fork any sandbox and tweak CSS variables live to explore the engine faster.
+
 ---
 
 <p align="center">
@@ -29,7 +39,7 @@
 
 ## Overview
 
-**StringTune-3D** is a 3D graphics module for the [StringTune](https://github.com/fiddle-digital/string-tune) ecosystem that lets you control 3D objects through **CSS custom properties**. No imperative Three.js code — just HTML attributes and CSS.
+**StringTune-3D** is a 3D graphics module for the [StringTune](https://www.npmjs.com/package/@fiddle-digital/string-tune) ecosystem that lets you control 3D objects through **CSS custom properties**. No imperative Three.js code — just HTML attributes and CSS.
 
 ```html
 <div
