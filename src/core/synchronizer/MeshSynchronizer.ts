@@ -1,9 +1,80 @@
 import { String3DObject } from "../String3DObject";
+import { I3DEngine, I3DMaterialVisualProps } from "../abstractions/I3DEngine";
 import type { SyncContext } from "./SyncContext";
 import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 import { StyleBundleCache } from "./StyleBundleCache";
 
 const DEG_TO_RAD = Math.PI / 180;
+
+type ParsedRgb = { r: number; g: number; b: number };
+
+function parseCssColorToRgb(value: string): ParsedRgb | null {
+  const raw = (value || "").trim().toLowerCase();
+  if (!raw) return null;
+
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)) {
+    const normalized =
+      raw.length === 4 ? `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}` : raw;
+    const r = Number.parseInt(normalized.slice(1, 3), 16) / 255;
+    const g = Number.parseInt(normalized.slice(3, 5), 16) / 255;
+    const b = Number.parseInt(normalized.slice(5, 7), 16) / 255;
+    return { r, g, b };
+  }
+
+  const rgb = raw.match(/rgba?\(([^)]+)\)/i);
+  if (rgb) {
+    const parts = rgb[1]
+      .replace(/\//g, " ")
+      .split(/[\s,]+/)
+      .map((part) => Number.parseFloat(part.trim()))
+      .filter((num) => Number.isFinite(num));
+    if (parts.length >= 3) {
+      return { r: parts[0] / 255, g: parts[1] / 255, b: parts[2] / 255 };
+    }
+  }
+
+  if (raw === "black") return { r: 0, g: 0, b: 0 };
+  if (raw === "white") return { r: 1, g: 1, b: 1 };
+  return null;
+}
+
+function isBlackCssColor(value: string): boolean {
+  const raw = (value || "").trim().toLowerCase();
+  if (!raw) return false;
+  if (raw === "black" || raw === "#000" || raw === "#000000") return true;
+
+  const parsed = parseCssColorToRgb(raw);
+  if (!parsed) return false;
+  return parsed.r === 0 && parsed.g === 0 && parsed.b === 0;
+}
+
+function applyColorToTarget(target: any, value: string): boolean {
+  if (!target) return false;
+
+  if (typeof target.set === "function") {
+    try {
+      target.set(value);
+      return true;
+    } catch {}
+  }
+
+  const rgb = parseCssColorToRgb(value);
+  if (!rgb) return false;
+
+  if (typeof target.setRGB === "function") {
+    target.setRGB(rgb.r, rgb.g, rgb.b);
+    return true;
+  }
+
+  if ("r" in target && "g" in target && "b" in target) {
+    target.r = rgb.r;
+    target.g = rgb.g;
+    target.b = rgb.b;
+    return true;
+  }
+
+  return false;
+}
 
 export class MeshSynchronizer implements String3DObjectSyncStrategy {
   private static styleCache = new StyleBundleCache<StyleBundle>();
@@ -22,10 +93,24 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
     }
   > = new WeakMap();
   private static lastGeometryQuality: WeakMap<String3DObject, number> = new WeakMap();
+  private static originalGeometryByMesh: WeakMap<object, any> = new WeakMap();
+  private static lodGeometryCacheByMesh: WeakMap<object, Map<string, any>> = new WeakMap();
+
+  static resolveEmissiveValue(el: HTMLElement, emissive?: string): string | undefined {
+    if (!emissive || emissive === "none") return undefined;
+
+    const inlineRaw = el.style.getPropertyValue("--material-emissive").trim();
+    if (inlineRaw) {
+      return emissive;
+    }
+
+    return isBlackCssColor(emissive) ? undefined : emissive;
+  }
 
   static applyVisualProps(
     el: HTMLElement,
     object: String3DObject,
+    engine: I3DEngine,
     props: {
       opacity?: number;
       color?: string;
@@ -34,7 +119,7 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
       emissive?: string;
       castShadow?: boolean;
       receiveShadow?: boolean;
-    }
+    },
   ): void {
     const prev = MeshSynchronizer.lastVisualProps.get(object);
     if (prev) {
@@ -72,16 +157,28 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
 
     const opacity = typeof props.opacity === "number" ? props.opacity : NaN;
 
+    const materialProps: I3DMaterialVisualProps = {
+      opacity: Number.isFinite(opacity) ? opacity : undefined,
+      color: props.color,
+      metalness: Number.isFinite(props.metalness as number) ? props.metalness : undefined,
+      roughness: Number.isFinite(props.roughness as number) ? props.roughness : undefined,
+      emissive: props.emissive,
+    };
+
     const applyMaterialProps = (mat: any) => {
       if (!mat) return;
+
+      if (engine.applyMaterialProps?.(mat, materialProps)) {
+        return;
+      }
 
       if (!isNaN(opacity)) {
         mat.opacity = opacity;
         mat.transparent = opacity < 1;
       }
 
-      if (props.color && mat.color && mat.color.set) {
-        mat.color.set(props.color);
+      if (props.color && mat.color) {
+        applyColorToTarget(mat.color, props.color);
       }
 
       if (typeof props.metalness === "number" && "metalness" in mat) {
@@ -92,29 +189,22 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
         mat.roughness = props.roughness;
       }
 
-      if (props.emissive && mat.emissive && mat.emissive.set) {
-        mat.emissive.set(props.emissive);
+      if (props.emissive) {
+        if (mat.emissive) {
+          applyColorToTarget(mat.emissive, props.emissive);
+        }
       }
     };
 
-    if (object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child.isMesh) {
-          if (child.castShadow !== castShadow) child.castShadow = castShadow;
-          if (child.receiveShadow !== receiveShadow) child.receiveShadow = receiveShadow;
-
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach(applyMaterialProps);
-        }
-      });
-    } else if ((object.object as any).isMesh) {
-      const mesh = object.object as any;
+    engine.forEachMesh(object.object, (mesh) => {
       if (mesh.castShadow !== castShadow) mesh.castShadow = castShadow;
       if (mesh.receiveShadow !== receiveShadow) mesh.receiveShadow = receiveShadow;
 
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const materials = Array.isArray((mesh as any).material)
+        ? (mesh as any).material
+        : [(mesh as any).material];
       materials.forEach(applyMaterialProps);
-    }
+    });
   }
 
   sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any {
@@ -144,7 +234,7 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         screenCenterX - ctx.viewportWidth / 2,
         -(screenCenterY - ctx.viewportHeight / 2),
-        translateZ
+        translateZ,
       );
     } else {
       const frustum = ctx.camera.getFrustumSizeAt(translateZ);
@@ -153,7 +243,7 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         (normalizedX - 0.5) * frustum.width,
         -(normalizedY - 0.5) * frustum.height,
-        translateZ
+        translateZ,
       );
     }
 
@@ -198,8 +288,8 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
                 ? scaleW
                 : scaleH
               : scaleW < scaleH
-              ? scaleW
-              : scaleH) * finalModelScale;
+                ? scaleW
+                : scaleH) * finalModelScale;
           scaleX = scaleY = uniformScale;
           scaleZ = uniformScale * cssScaleZ;
         } else {
@@ -223,12 +313,12 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
 
     object.object.scale.set(scaleX, scaleY, scaleZ);
 
-    MeshSynchronizer.applyVisualProps(el, object, {
+    MeshSynchronizer.applyVisualProps(el, object, ctx.engine, {
       opacity,
       color: color && color !== "none" ? color : undefined,
       metalness: isNaN(metalness) ? undefined : metalness,
       roughness: isNaN(roughness) ? undefined : roughness,
-      emissive: emissive && emissive !== "none" ? emissive : undefined,
+      emissive: MeshSynchronizer.resolveEmissiveValue(el, emissive),
       castShadow,
       receiveShadow,
     });
@@ -241,8 +331,7 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
   }
 
   private applyGeometryQuality(object: String3DObject, quality: number, ctx: SyncContext): void {
-    const engine: any = ctx.engine as any;
-    const simplify = engine?.simplifyGeometry?.bind(engine);
+    const simplify = ctx.engine.simplifyGeometry?.bind(ctx.engine);
     if (typeof simplify !== "function") return;
 
     const normalized = Number.isFinite(quality) && quality > 0 ? quality : 1;
@@ -252,37 +341,30 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
 
     const applyToMesh = (mesh: any) => {
       if (!mesh?.geometry) return;
-      const userData = mesh.userData || (mesh.userData = {});
-      if (!userData.__originalGeometry) {
-        userData.__originalGeometry = mesh.geometry;
+      if (!MeshSynchronizer.originalGeometryByMesh.has(mesh)) {
+        MeshSynchronizer.originalGeometryByMesh.set(mesh, mesh.geometry);
       }
-      const original = userData.__originalGeometry;
+      const original = MeshSynchronizer.originalGeometryByMesh.get(mesh);
       if (normalized >= 0.999) {
         mesh.geometry = original;
         return;
       }
-      if (!userData.__lodCache) {
-        userData.__lodCache = new Map<string, any>();
+      if (!MeshSynchronizer.lodGeometryCacheByMesh.has(mesh)) {
+        MeshSynchronizer.lodGeometryCacheByMesh.set(mesh, new Map<string, any>());
       }
+      const lodCache = MeshSynchronizer.lodGeometryCacheByMesh.get(mesh)!;
       const key = normalized.toFixed(3);
-      if (userData.__lodCache.has(key)) {
-        mesh.geometry = userData.__lodCache.get(key);
+      if (lodCache.has(key)) {
+        mesh.geometry = lodCache.get(key);
         return;
       }
       const simplified = simplify(original, normalized);
       if (simplified) {
-        userData.__lodCache.set(key, simplified);
+        lodCache.set(key, simplified);
         mesh.geometry = simplified;
       }
     };
-
-    if (object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child?.isMesh) applyToMesh(child);
-      });
-    } else if ((object.object as any).isMesh) {
-      applyToMesh(object.object as any);
-    }
+    ctx.engine.forEachMesh(object.object, applyToMesh);
   }
 
   private updateCustomUniforms(el: HTMLElement, object: String3DObject, ctx: SyncContext): void {
@@ -292,10 +374,15 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
     const style = getComputedStyle(el);
 
     const apply = (mat: any) => {
-      const definition = mat?.userData?.definition;
+      const definition = factory.getMaterialDefinition?.(mat) ?? mat?.userData?.definition;
       if (!definition?.uniforms) return;
 
       const values = factory.parseUniformsFromCSS(definition, el, style);
+
+      if (typeof factory.applyUniforms === "function") {
+        factory.applyUniforms(mat, definition, values);
+        return;
+      }
 
       for (const [key, value] of Object.entries(values)) {
         const def = definition.uniforms?.[key];
@@ -304,28 +391,12 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
         const converter = (factory as any).convertUniformValue?.bind(factory);
         const converted = converter ? converter(def.type, value) : value;
 
-        if (mat.userData?.shader?.uniforms?.[key]) {
-          mat.userData.shader.uniforms[key].value = converted;
-        } else if (mat.userData?.customUniforms?.[key]) {
-          mat.userData.customUniforms[key].value = converted;
-        } else if (mat.uniforms?.[key]) {
+        if (mat.uniforms?.[key]) {
           mat.uniforms[key].value = converted;
         }
       }
     };
-
-    if (object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child.isMesh) {
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach(apply);
-        }
-      });
-    } else if ((object.object as any).isMesh) {
-      const mesh = object.object as any;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      materials.forEach(apply);
-    }
+    ctx.engine.forEachMaterial(object.object, apply);
   }
 
   private readStyleBundle(el: HTMLElement, ctx: SyncContext): StyleBundle {
@@ -365,8 +436,8 @@ export class MeshSynchronizer implements String3DObjectSyncStrategy {
         return norm === "true" || norm === "1" || norm === "yes"
           ? true
           : norm === "false" || norm === "0" || norm === "no"
-          ? false
-          : fallback;
+            ? false
+            : fallback;
       };
 
       return {

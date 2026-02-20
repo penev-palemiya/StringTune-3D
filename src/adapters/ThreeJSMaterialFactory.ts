@@ -9,6 +9,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
   private THREE: any;
   private textureLoader: any;
   private textureCache: Map<string, any> = new Map();
+  private meshTransmissionMaterialClass: any = null;
 
   constructor(THREE: any) {
     this.THREE = THREE;
@@ -21,7 +22,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
 
   create(
     definition: String3DCustomMaterialDefinition,
-    initialUniforms?: Record<string, any>
+    initialUniforms?: Record<string, any>,
   ): IMaterialInstance {
     const uniforms = this.buildUniforms(definition, initialUniforms);
 
@@ -49,14 +50,59 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
   parseUniformsFromCSS(
     definition: String3DCustomMaterialDefinition,
     element: HTMLElement,
-    style: CSSStyleDeclaration
+    style: CSSStyleDeclaration,
   ): Record<string, any> {
     return collectUniformsFromCSS(definition, element, style);
   }
 
+  getMaterialDefinition(material: any): String3DCustomMaterialDefinition | null {
+    const definition = material?.userData?.definition;
+    return definition || null;
+  }
+
+  isShaderMaterial(material: any): boolean {
+    return !!material?.isShaderMaterial;
+  }
+
+  applyUniforms(
+    material: any,
+    definition: String3DCustomMaterialDefinition,
+    values: Record<string, any>,
+  ): void {
+    const shader = material?.userData?.shader;
+    const customUniforms = material?.userData?.customUniforms;
+
+    if (shader?.uniforms) {
+      for (const [key, value] of Object.entries(values)) {
+        const uniformDef = definition.uniforms?.[key];
+        if (uniformDef && shader.uniforms[key]) {
+          shader.uniforms[key].value = this.convertUniformValue(uniformDef.type, value);
+        }
+      }
+    }
+
+    if (customUniforms) {
+      for (const [key, value] of Object.entries(values)) {
+        const uniformDef = definition.uniforms?.[key];
+        if (uniformDef && customUniforms[key]) {
+          customUniforms[key].value = this.convertUniformValue(uniformDef.type, value);
+        }
+      }
+    }
+
+    if (material?.uniforms) {
+      for (const [key, value] of Object.entries(values)) {
+        const uniformDef = definition.uniforms?.[key];
+        if (uniformDef && material.uniforms[key]) {
+          material.uniforms[key].value = this.convertUniformValue(uniformDef.type, value);
+        }
+      }
+    }
+  }
+
   private buildUniforms(
     definition: String3DCustomMaterialDefinition,
-    initialValues?: Record<string, any>
+    initialValues?: Record<string, any>,
   ): Record<string, { value: any }> {
     const result: Record<string, { value: any }> = {};
 
@@ -117,7 +163,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
 
   private createShaderMaterial(
     definition: String3DCustomMaterialDefinition,
-    uniforms: Record<string, { value: any }>
+    uniforms: Record<string, { value: any }>,
   ): any {
     const material = new this.THREE.ShaderMaterial({
       uniforms,
@@ -133,7 +179,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
 
   private createExtendedMaterial(
     definition: String3DCustomMaterialDefinition,
-    uniforms: Record<string, { value: any }>
+    uniforms: Record<string, { value: any }>,
   ): any {
     const baseType = definition.extends || "standard";
     let BaseMaterial: any;
@@ -165,7 +211,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
         shader.fragmentShader = this.injectFragmentShader(
           shader.fragmentShader,
           injectionMap,
-          uniforms
+          uniforms,
         );
 
         material.userData.shader = shader;
@@ -178,10 +224,11 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     return material;
   }
 
+
   private injectVertexShader(
     shader: string,
     injections: Map<string, string>,
-    uniforms: Record<string, { value: any }>
+    uniforms: Record<string, { value: any }>,
   ): string {
     let result = shader;
 
@@ -212,7 +259,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
   private injectFragmentShader(
     shader: string,
     injections: Map<string, string>,
-    uniforms: Record<string, { value: any }>
+    uniforms: Record<string, { value: any }>,
   ): string {
     let result = shader;
 
@@ -236,7 +283,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (normal) {
       result = result.replace(
         "#include <normal_fragment_maps>",
-        `#include <normal_fragment_maps>\n${normal}`
+        `#include <normal_fragment_maps>\n${normal}`,
       );
     }
 
@@ -244,7 +291,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (roughness) {
       result = result.replace(
         "#include <roughnessmap_fragment>",
-        `#include <roughnessmap_fragment>\n${roughness}`
+        `#include <roughnessmap_fragment>\n${roughness}`,
       );
     }
 
@@ -252,7 +299,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (metalness) {
       result = result.replace(
         "#include <metalnessmap_fragment>",
-        `#include <metalnessmap_fragment>\n${metalness}`
+        `#include <metalnessmap_fragment>\n${metalness}`,
       );
     }
 
@@ -265,7 +312,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (transmission) {
       result = result.replace(
         "#include <transmission_fragment>",
-        `#include <transmission_fragment>\n${transmission}`
+        `#include <transmission_fragment>\n${transmission}`,
       );
     }
 
@@ -273,7 +320,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (lights) {
       result = result.replace(
         "#include <lights_physical_fragment>",
-        `#include <lights_physical_fragment>\n${lights}`
+        `#include <lights_physical_fragment>\n${lights}`,
       );
     }
 
@@ -281,7 +328,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (emissive) {
       result = result.replace(
         "#include <emissivemap_fragment>",
-        `#include <emissivemap_fragment>\n${emissive}`
+        `#include <emissivemap_fragment>\n${emissive}`,
       );
     }
 
@@ -289,7 +336,7 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (output) {
       result = result.replace(
         "#include <dithering_fragment>",
-        `${output}\n#include <dithering_fragment>`
+        `${output}\n#include <dithering_fragment>`,
       );
     }
 
@@ -322,13 +369,16 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
 
   private applyMaterialProperties(
     material: any,
-    definition: String3DCustomMaterialDefinition
+    definition: String3DCustomMaterialDefinition,
   ): void {
     const props = definition.properties;
     if (!props) return;
 
     if (props.transparent !== undefined) {
       material.transparent = props.transparent;
+    }
+    if (props.opacity !== undefined && "opacity" in material) {
+      material.opacity = props.opacity;
     }
 
     if (props.side !== undefined) {
@@ -372,40 +422,51 @@ export class ThreeJSMaterialFactory implements IMaterialFactory {
     if (props.wireframe !== undefined) {
       material.wireframe = props.wireframe;
     }
+
+    if (props.color !== undefined && material.color) {
+      material.color.set(props.color);
+    }
+    if (props.emissive !== undefined && material.emissive) {
+      material.emissive.set(props.emissive);
+    }
+    if (props.metalness !== undefined && "metalness" in material) {
+      material.metalness = props.metalness;
+    }
+    if (props.roughness !== undefined && "roughness" in material) {
+      material.roughness = props.roughness;
+    }
+    if (props.transmission !== undefined && "transmission" in material) {
+      material.transmission = props.transmission;
+    }
+    if (props.thickness !== undefined && "thickness" in material) {
+      material.thickness = props.thickness;
+    }
+    if (props.ior !== undefined && "ior" in material) {
+      material.ior = props.ior;
+    }
+    if (props.reflectivity !== undefined && "reflectivity" in material) {
+      material.reflectivity = props.reflectivity;
+    }
+    if (props.clearcoat !== undefined && "clearcoat" in material) {
+      material.clearcoat = props.clearcoat;
+    }
+    if (props.clearcoatRoughness !== undefined && "clearcoatRoughness" in material) {
+      material.clearcoatRoughness = props.clearcoatRoughness;
+    }
+    if (props.attenuationDistance !== undefined && "attenuationDistance" in material) {
+      material.attenuationDistance = props.attenuationDistance;
+    }
+    if (props.attenuationColor !== undefined && material.attenuationColor) {
+      material.attenuationColor.set(props.attenuationColor);
+    }
   }
 
   private updateUniforms(
     material: any,
     definition: String3DCustomMaterialDefinition,
-    newValues: Record<string, any>
+    newValues: Record<string, any>,
   ): void {
-    const shader = material.userData?.shader;
-    const customUniforms = material.userData?.customUniforms;
-
-    if (shader?.uniforms) {
-      for (const [key, value] of Object.entries(newValues)) {
-        const uniformDef = definition.uniforms?.[key];
-        if (uniformDef && shader.uniforms[key]) {
-          shader.uniforms[key].value = this.convertUniformValue(uniformDef.type, value);
-        }
-      }
-    } else if (customUniforms) {
-      for (const [key, value] of Object.entries(newValues)) {
-        const uniformDef = definition.uniforms?.[key];
-        if (uniformDef && customUniforms[key]) {
-          customUniforms[key].value = this.convertUniformValue(uniformDef.type, value);
-        }
-      }
-    }
-
-    if (material.uniforms) {
-      for (const [key, value] of Object.entries(newValues)) {
-        const uniformDef = definition.uniforms?.[key];
-        if (uniformDef && material.uniforms[key]) {
-          material.uniforms[key].value = this.convertUniformValue(uniformDef.type, value);
-        }
-      }
-    }
+    this.applyUniforms(material, definition, newValues);
   }
 
   private getDefaultVertexShader(): string {

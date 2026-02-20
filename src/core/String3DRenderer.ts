@@ -1,4 +1,12 @@
-import { I3DEngine, I3DRenderer, I3DObject, I3DRenderTarget } from "./abstractions/I3DEngine";
+import {
+  I3DEngine,
+  I3DLayerIsolationState,
+  I3DRenderer,
+  I3DObject,
+  I3DPostProcessRuntime,
+  I3DRenderTarget,
+} from "./abstractions/I3DEngine";
+import { resolvePostProcessRuntime } from "./abstractions/engineCapabilities";
 import { String3DCamera } from "./String3DCamera";
 import { String3DScene } from "./String3DScene";
 import { String3DFilterPipeline } from "./filters/String3DFilterPipeline";
@@ -18,6 +26,7 @@ export class String3DRenderer {
   private _width: number;
   private _height: number;
   private engine: I3DEngine;
+  private postProcessRuntime: I3DPostProcessRuntime | null;
   private filterPipeline: String3DFilterPipeline | null = null;
   private filterCache: Map<string, FilterCacheEntry> = new Map();
   private frameId = 0;
@@ -39,16 +48,21 @@ export class String3DRenderer {
       alpha: true,
       logarithmicDepthBuffer: true,
     });
-    const rendererAny = this._renderer as any;
-    if (typeof rendererAny.setClearColor === "function") {
-      rendererAny.setClearColor(0x000000, 0);
-    }
-    this._renderer.setPixelRatio(window.devicePixelRatio);
+    const configuredPixelRatio = this.engine.getRecommendedPixelRatio?.();
+    const pixelRatio =
+      typeof configuredPixelRatio === "number" && Number.isFinite(configuredPixelRatio)
+        ? Math.max(0.1, configuredPixelRatio)
+        : 1;
+    this._renderer.setPixelRatio(pixelRatio);
     this._renderer.setSize(width, height);
+    this.engine.configureRenderer?.(this._renderer, {
+      width,
+      height,
+      pixelRatio,
+      container: this._container,
+    });
 
-    if (this._renderer.shadowMap) {
-      this._renderer.shadowMap.enabled = true;
-    }
+    this.postProcessRuntime = resolvePostProcessRuntime(this.engine, this._renderer);
   }
 
   public attach(): void {
@@ -58,7 +72,7 @@ export class String3DRenderer {
   public render(
     scene: String3DScene,
     camera: String3DCamera,
-    filterTargets: String3DFilterTarget[] = []
+    filterTargets: String3DFilterTarget[] = [],
   ): void {
     if (filterTargets.length === 0) {
       this._renderer.render(scene.getScene(), camera.camera);
@@ -97,12 +111,8 @@ export class String3DRenderer {
     const rendererAny = this._renderer as any;
     const prevAutoClear = rendererAny.autoClear;
     rendererAny.autoClear = true;
-    if (rendererAny.setRenderTarget) {
-      rendererAny.setRenderTarget(null);
-    }
-    if (rendererAny.clear) {
-      rendererAny.clear(true, true, true);
-    }
+    this.postProcessRuntime?.setRenderTarget(this._renderer, null);
+    this.postProcessRuntime?.clear(this._renderer, true, true, true);
     this._renderer.render(scene.getScene(), camera.camera);
 
     rendererAny.autoClear = false;
@@ -115,7 +125,14 @@ export class String3DRenderer {
     });
 
     const lights = allObjects.filter((obj) => obj.type.endsWith("Light"));
-    const supportsLayers = this.supportsLayers(camera.camera, allObjects);
+    const supportsLayerIsolation =
+      this.engine.supportsObjectLayerIsolation?.(
+        camera.camera,
+        allObjects.map((entry) => entry.object),
+      ) === true &&
+      typeof this.engine.beginObjectLayerIsolation === "function" &&
+      typeof this.engine.endObjectLayerIsolation === "function";
+    let usedVisibilityFallback = false;
 
     filterTargets.forEach((target) => {
       const cache = this.filterCache.get(target.object.id);
@@ -133,20 +150,26 @@ export class String3DRenderer {
 
       const effects = this.injectEffectContext(
         target.object.el as HTMLElement | undefined,
-        target.effects
+        target.effects,
       );
 
       const allowed = new Set<I3DObject>();
       this.collectSubtreeObjects(target.object, allowed);
 
-      let restoreLayers: Array<{ object: I3DObject; mask: number }> = [];
-      let restoreCameraMask: number | null = null;
-
-      if (supportsLayers) {
+      let isolationState: I3DLayerIsolationState | null = null;
+      if (supportsLayerIsolation) {
         const subtree = target.object.getSubtreeObjects();
-        restoreLayers = this.applyLayerMask(subtree, lights, this.filterLayer);
-        restoreCameraMask = this.setCameraLayer(camera.camera, this.filterLayer);
-      } else {
+        isolationState =
+          this.engine.beginObjectLayerIsolation?.(
+            camera.camera,
+            subtree,
+            lights.map((entry) => entry.object),
+            this.filterLayer,
+          ) || null;
+      }
+
+      if (!isolationState) {
+        usedVisibilityFallback = true;
         allObjects.forEach((obj) => {
           const originalVisible = visibility.get(obj.object);
           if (originalVisible === false) {
@@ -164,25 +187,16 @@ export class String3DRenderer {
       }
 
       const input = pipeline.acquireTarget();
-      if (rendererAny.setRenderTarget) {
-        rendererAny.setRenderTarget(input);
-      }
-      if (rendererAny.clear) {
-        rendererAny.clear(true, true, true);
-      }
+      this.postProcessRuntime?.setRenderTarget(this._renderer, input);
+      this.postProcessRuntime?.clear(this._renderer, true, true, true);
       this._renderer.render(scene.getScene(), camera.camera);
 
       const output = pipeline.applyFilters(input, effects, this.qualityScale);
-      if (rendererAny.setRenderTarget) {
-        rendererAny.setRenderTarget(null);
-      }
+      this.postProcessRuntime?.setRenderTarget(this._renderer, null);
       pipeline.renderToScreen(output);
 
-      if (supportsLayers) {
-        this.restoreLayerMask(restoreLayers);
-        if (restoreCameraMask !== null) {
-          this.restoreCameraLayer(camera.camera, restoreCameraMask);
-        }
+      if (isolationState) {
+        this.engine.endObjectLayerIsolation?.(camera.camera, isolationState);
       }
 
       if (output !== input) {
@@ -202,7 +216,7 @@ export class String3DRenderer {
       this.filterCache.set(target.object.id, entry);
     });
 
-    if (!supportsLayers) {
+    if (usedVisibilityFallback) {
       allObjects.forEach((obj) => {
         const originalVisible = visibility.get(obj.object);
         if (typeof originalVisible !== "undefined") {
@@ -245,15 +259,17 @@ export class String3DRenderer {
   }
 
   private ensureFilterPipeline(): String3DFilterPipeline | null {
-    if (!this.canCreateFilterPipeline()) {
+    const runtime = this.postProcessRuntime;
+    if (!runtime || !this.canCreateFilterPipeline()) {
       return null;
     }
     if (!this.filterPipeline) {
       this.filterPipeline = new String3DFilterPipeline(
         this.engine,
         this._renderer,
+        runtime,
         this._width,
-        this._height
+        this._height,
       );
       this.filterPipeline.setScale(this.qualityScale);
     }
@@ -261,16 +277,12 @@ export class String3DRenderer {
   }
 
   private canCreateFilterPipeline(): boolean {
-    return (
-      typeof this.engine.createRenderTarget === "function" &&
-      typeof this.engine.createShaderMaterial === "function" &&
-      typeof (this._renderer as any).setRenderTarget === "function"
-    );
+    return !!this.postProcessRuntime;
   }
 
   private collectSubtreeObjects(
     object: import("./String3DObject").String3DObject,
-    set: Set<I3DObject>
+    set: Set<I3DObject>,
   ): void {
     set.add(object.object);
     object.children.forEach((child) => this.collectSubtreeObjects(child, set));
@@ -295,7 +307,7 @@ export class String3DRenderer {
 
   private injectEffectContext(
     el: HTMLElement | undefined,
-    effects: String3DFilterEffect[]
+    effects: String3DFilterEffect[],
   ): String3DFilterEffect[] {
     if (!effects.some((effect) => effect.type === "custom")) {
       return effects;
@@ -351,61 +363,5 @@ export class String3DRenderer {
         this.filterCache.delete(key);
       }
     });
-  }
-
-  private supportsLayers(camera: any, objects: Array<{ object: I3DObject }>): boolean {
-    if (!camera?.layers || typeof camera.layers.set !== "function") return false;
-    return objects.some((obj) => this.hasLayers(obj.object));
-  }
-
-  private hasLayers(object: any): boolean {
-    return object?.layers && typeof object.layers.set === "function";
-  }
-
-  private applyLayerMask(
-    objects: I3DObject[],
-    lights: Array<{ object: I3DObject }>,
-    layer: number
-  ): Array<{ object: I3DObject; mask: number }> {
-    const restoredMap = new Map<I3DObject, number>();
-    const apply = (obj: I3DObject, setMode: "set" | "enable") => {
-      const anyObj = obj as any;
-      if (!this.hasLayers(anyObj)) return;
-      if (!restoredMap.has(obj)) {
-        restoredMap.set(obj, anyObj.layers.mask);
-      }
-      if (setMode === "set") {
-        anyObj.layers.set(layer);
-      } else {
-        anyObj.layers.enable(layer);
-      }
-    };
-
-    objects.forEach((obj) => apply(obj, "set"));
-    lights.forEach((light) => apply(light.object, "enable"));
-
-    return Array.from(restoredMap.entries()).map(([object, mask]) => ({ object, mask }));
-  }
-
-  private restoreLayerMask(entries: Array<{ object: I3DObject; mask: number }>): void {
-    entries.forEach((entry) => {
-      const anyObj = entry.object as any;
-      if (this.hasLayers(anyObj)) {
-        anyObj.layers.mask = entry.mask;
-      }
-    });
-  }
-
-  private setCameraLayer(camera: any, layer: number): number | null {
-    if (!camera?.layers || typeof camera.layers.set !== "function") return null;
-    const prev = camera.layers.mask;
-    camera.layers.set(layer);
-    return prev;
-  }
-
-  private restoreCameraLayer(camera: any, mask: number): void {
-    if (camera?.layers) {
-      camera.layers.mask = mask;
-    }
   }
 }

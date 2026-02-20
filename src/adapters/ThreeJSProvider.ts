@@ -1,4 +1,9 @@
 import {
+  I3DBackend,
+  I3DCustomFilterRegistryRuntime,
+  I3DCustomMaterialRegistryRuntime,
+  I3DEngineCapabilities,
+  I3DPostProcessRuntime,
   I3DEngine,
   I3DVector3,
   I3DVector2,
@@ -8,6 +13,7 @@ import {
   I3DBox3,
   I3DScene,
   I3DRenderer,
+  I3DRendererConfigContext,
   I3DPerspectiveCamera,
   I3DOrthographicCamera,
   I3DObject,
@@ -18,13 +24,20 @@ import {
   I3DLight,
   I3DTextureLoader,
   I3DModelLoader,
+  I3DLayerIsolationState,
+  I3DCamera,
+  I3DModelLoaderOptions,
+  I3DMaterialVisualProps,
   ParticleSystemConfig,
   I3DParticleSystem,
 } from "../core/abstractions/I3DEngine";
 import { I3DEngineProvider } from "../core/abstractions/I3DEngineProvider";
 import { IMaterialFactory } from "../core/materials";
 import { ThreeJSMaterialFactory } from "./ThreeJSMaterialFactory";
+import { ThreePostProcessPipeline } from "./ThreePostProcessPipeline";
+import { String3DCustomFilterRegistry } from "../core/filters/String3DCustomFilter";
 import { FontConverter } from "../core/text";
+import { String3DCustomMaterialRegistry } from "../core/materials";
 
 export class ThreeJSEngine implements I3DEngine {
   private THREE: any;
@@ -84,6 +97,24 @@ export class ThreeJSEngine implements I3DEngine {
     return renderer;
   }
 
+  getRecommendedPixelRatio(): number {
+    if (typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)) {
+      return Math.max(0.1, window.devicePixelRatio);
+    }
+    return 1;
+  }
+
+  configureRenderer(renderer: I3DRenderer, _context: I3DRendererConfigContext): void {
+    const anyRenderer = renderer as any;
+    if (typeof anyRenderer.setClearColor === "function") {
+      anyRenderer.setClearColor(0x000000, 0);
+    }
+
+    if (renderer.shadowMap) {
+      renderer.shadowMap.enabled = true;
+    }
+  }
+
   createPerspectiveCamera(fov = 45, aspect = 1, near = 0.1, far = 2000): I3DPerspectiveCamera {
     return new this.THREE.PerspectiveCamera(fov, aspect, near, far);
   }
@@ -94,7 +125,7 @@ export class ThreeJSEngine implements I3DEngine {
     top: number,
     bottom: number,
     near = 0.1,
-    far = 10000
+    far = 10000,
   ): I3DOrthographicCamera {
     return new this.THREE.OrthographicCamera(left, right, top, bottom, near, far);
   }
@@ -123,7 +154,7 @@ export class ThreeJSEngine implements I3DEngine {
     radiusTop: number,
     radiusBottom: number,
     height: number,
-    segments = 32
+    segments = 32,
   ): I3DGeometry {
     return new this.THREE.CylinderGeometry(radiusTop, radiusBottom, height, segments);
   }
@@ -149,7 +180,7 @@ export class ThreeJSEngine implements I3DEngine {
     distance = 0,
     angle = Math.PI / 3,
     penumbra = 0,
-    decay = 1
+    decay = 1,
   ): I3DLight {
     return new this.THREE.SpotLight(color, intensity, distance, angle, penumbra, decay);
   }
@@ -157,7 +188,7 @@ export class ThreeJSEngine implements I3DEngine {
   createHemisphereLight(
     skyColor?: string | number,
     groundColor?: string | number,
-    intensity = 1
+    intensity = 1,
   ): I3DLight {
     return new this.THREE.HemisphereLight(skyColor, groundColor, intensity);
   }
@@ -180,6 +211,33 @@ export class ThreeJSEngine implements I3DEngine {
       throw new Error(`[ThreeJSEngine] Model loader "${type}" not registered`);
     }
     return new LoaderClass();
+  }
+
+  configureModelLoader(loader: I3DModelLoader, options: I3DModelLoaderOptions): void {
+    const manager = (loader as any)?.manager;
+    if (!manager || typeof manager.setURLModifier !== "function") {
+      return;
+    }
+
+    const baseRaw = (options.textureBaseUrl || "").trim();
+    const base = baseRaw ? baseRaw.replace(/\/?$/, "/") : "";
+    const textureMap = options.textureMap || null;
+
+    manager.setURLModifier((url: string) => {
+      const mapped =
+        textureMap && Object.prototype.hasOwnProperty.call(textureMap, url)
+          ? textureMap[url]
+          : url;
+      const resolved = typeof mapped === "string" && mapped ? mapped : url;
+      if (!base) return resolved;
+      if (/^(blob:|data:|https?:|file:|\/)/i.test(resolved)) return resolved;
+      return base + resolved.replace(/^\.?\//, "");
+    });
+  }
+
+  resolveLoadedModelRoot(loadedModel: any): I3DObject | null {
+    if (!loadedModel || typeof loadedModel !== "object") return null;
+    return (loadedModel?.scene || loadedModel?.object || loadedModel) as I3DObject;
   }
 
   createRenderTarget(width: number, height: number, options: any = {}): I3DRenderTarget {
@@ -246,7 +304,7 @@ export class ThreeJSEngine implements I3DEngine {
         undefined,
         () => {
           resolve(null);
-        }
+        },
       );
     });
   }
@@ -277,7 +335,7 @@ export class ThreeJSEngine implements I3DEngine {
     fontData: any,
     text: string,
     size: number,
-    normalizePosition: boolean = false
+    normalizePosition: boolean = false,
   ): any[] {
     const shapes: any[] = [];
     const scale = size / fontData.resolution;
@@ -402,7 +460,7 @@ export class ThreeJSEngine implements I3DEngine {
   private pointInPolygon(
     px: number,
     py: number,
-    polygon: Array<{ x: number; y: number }>
+    polygon: Array<{ x: number; y: number }>,
   ): boolean {
     let inside = false;
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -467,7 +525,7 @@ export class ThreeJSEngine implements I3DEngine {
     outline: string,
     scale: number,
     offsetX: number = 0,
-    outlineFormat?: string
+    outlineFormat?: string,
   ): any[] {
     if (!outline) return [];
 
@@ -502,7 +560,7 @@ export class ThreeJSEngine implements I3DEngine {
               parseFloat(commands[i + 1]) * scale + offsetX,
               -parseFloat(commands[i + 2]) * scale,
               qx,
-              qy
+              qy,
             );
             i += 5;
           }
@@ -517,7 +575,7 @@ export class ThreeJSEngine implements I3DEngine {
               parseFloat(commands[i + 3]) * scale + offsetX,
               -parseFloat(commands[i + 4]) * scale,
               bx,
-              by
+              by,
             );
             i += 7;
           }
@@ -595,7 +653,7 @@ export class ThreeJSEngine implements I3DEngine {
             !this.pointInPolygon(
               testPoint.x,
               testPoint.y,
-              outerPath.points.map((p: any) => ({ x: p.x, y: p.y }))
+              outerPath.points.map((p: any) => ({ x: p.x, y: p.y })),
             )
           ) {
             allPointsInside = false;
@@ -647,7 +705,7 @@ export class ThreeJSEngine implements I3DEngine {
           curve.v1.x,
           curve.v1.y,
           curve.v0.x,
-          curve.v0.y
+          curve.v0.y,
         );
       }
     }
@@ -740,7 +798,7 @@ export class ThreeJSEngine implements I3DEngine {
     line: string,
     font: any,
     size: number,
-    letterSpacing: number
+    letterSpacing: number,
   ): { shapes: any[]; width: number } {
     const shapes: any[] = [];
     let x = 0;
@@ -833,7 +891,7 @@ export class ThreeJSEngine implements I3DEngine {
   private resolveParticleModelGeometry(
     modelUrl: string,
     loaderType?: string,
-    nodeName?: string
+    nodeName?: string,
   ): Promise<any | null> {
     const url = modelUrl.trim();
     if (!url || url === "none") {
@@ -844,8 +902,8 @@ export class ThreeJSEngine implements I3DEngine {
       loaderType && loaderType !== "none"
         ? loaderType
         : this.loaders.gltf
-        ? "gltf"
-        : Object.keys(this.loaders)[0];
+          ? "gltf"
+          : Object.keys(this.loaders)[0];
     if (!normalizedLoader) {
       return Promise.resolve(null);
     }
@@ -915,7 +973,7 @@ export class ThreeJSEngine implements I3DEngine {
         undefined,
         () => {
           resolve(null);
-        }
+        },
       );
     });
 
@@ -1100,7 +1158,7 @@ export class ThreeJSEngine implements I3DEngine {
           .resolveParticleModelGeometry(
             url,
             this.cfg.instanceModelLoader,
-            this.cfg.instanceModelNode
+            this.cfg.instanceModelNode,
           )
           .then((geometry) => {
             if (!geometry) return;
@@ -1156,7 +1214,7 @@ export class ThreeJSEngine implements I3DEngine {
         const count = Math.min(
           this.transitionFromPositions.length / 3,
           this.transitionToPositions.length / 3,
-          this.basePositions.length / 3
+          this.basePositions.length / 3,
         );
 
         for (let i = 0; i < count; i += 1) {
@@ -1444,8 +1502,8 @@ export class ThreeJSEngine implements I3DEngine {
           this.cfg.particleShape === "model" && this.modelGeometry
             ? this.modelGeometry
             : this.cfg.particleShape === "box"
-            ? new THREE.BoxGeometry(1, 1, 1)
-            : new THREE.SphereGeometry(0.5, 8, 8);
+              ? new THREE.BoxGeometry(1, 1, 1)
+              : new THREE.SphereGeometry(0.5, 8, 8);
         this.instancedUsesSharedGeometry = useSharedGeometry;
         const material = new THREE.MeshStandardMaterial({
           color: new THREE.Color(this.cfg.color),
@@ -1465,7 +1523,7 @@ export class ThreeJSEngine implements I3DEngine {
 
       setMaterial(
         material: any | null,
-        options: { points?: boolean; meshes?: boolean } = {}
+        options: { points?: boolean; meshes?: boolean } = {},
       ): void {
         const setPoints = options.points ?? true;
         const setMeshes = options.meshes ?? true;
@@ -1619,12 +1677,12 @@ export class ThreeJSEngine implements I3DEngine {
           temp.position.set(
             baseX * dispersal + scatterOffsetX + driftX + jitterX,
             baseY * dispersal + scatterOffsetY + driftY + jitterY,
-            baseZ * dispersal + scatterOffsetZ + driftZ + jitterZ
+            baseZ * dispersal + scatterOffsetZ + driftZ + jitterZ,
           );
           temp.rotation.set(
             this.baseJitter[i3] * 0.5,
             time * rotSpeed + i * 0.1,
-            this.baseJitter[i3 + 2] * 0.5
+            this.baseJitter[i3 + 2] * 0.5,
           );
           const scale = this.baseScales[i] * this.cfg.size;
           temp.scale.set(scale, scale, scale);
@@ -1666,7 +1724,7 @@ export class ThreeJSEngine implements I3DEngine {
           }
           material.vertexShader = material.vertexShader.replace(
             /void\\s+main\\s*\\(\\)\\s*\\{/,
-            "void main() {\\n  gl_PointSize = uPointSize;"
+            "void main() {\\n  gl_PointSize = uPointSize;",
           );
           material.needsUpdate = true;
         }
@@ -1693,7 +1751,7 @@ export class ThreeJSEngine implements I3DEngine {
           .resolveParticleModelGeometry(
             url,
             this.cfg.particleModelLoader,
-            this.cfg.particleModelNode
+            this.cfg.particleModelNode,
           )
           .then((geometry) => {
             if (!geometry) return;
@@ -1726,7 +1784,7 @@ export class ThreeJSEngine implements I3DEngine {
           .resolveParticleModelGeometry(
             url,
             this.cfg.instanceModelLoader,
-            this.cfg.instanceModelNode
+            this.cfg.instanceModelNode,
           )
           .then((geometry) => {
             if (!geometry) return;
@@ -1964,6 +2022,187 @@ export class ThreeJSEngine implements I3DEngine {
     return new ParticleSystem(config) as unknown as I3DParticleSystem;
   }
 
+  forEachMesh(object: I3DObject, callback: (mesh: I3DMesh) => void): void {
+    const visit = (node: any) => {
+      if (node?.isMesh) {
+        callback(node as I3DMesh);
+      }
+    };
+
+    const anyObject = object as any;
+    if (typeof anyObject?.traverse === "function") {
+      anyObject.traverse((child: any) => visit(child));
+      return;
+    }
+
+    visit(anyObject);
+  }
+
+  forEachMaterial(object: I3DObject, callback: (material: I3DMaterial) => void): void {
+    const visit = (node: any) => {
+      if (!node || (!node.isMesh && !node.isPoints)) return;
+      const materials = Array.isArray(node.material) ? node.material : [node.material];
+      materials.forEach((mat: any) => {
+        if (mat) callback(mat as I3DMaterial);
+      });
+    };
+
+    const anyObject = object as any;
+    if (typeof anyObject?.traverse === "function") {
+      anyObject.traverse((child: any) => visit(child));
+      return;
+    }
+
+    visit(anyObject);
+  }
+
+  getPrimaryMesh(object: I3DObject): I3DMesh | null {
+    let first: I3DMesh | null = null;
+    this.forEachMesh(object, (mesh) => {
+      if (!first) first = mesh;
+    });
+    return first;
+  }
+
+  applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean {
+    const anyGeometry = geometry as any;
+    if (typeof anyGeometry?.applyToMesh !== "function") {
+      return false;
+    }
+
+    anyGeometry.applyToMesh(mesh);
+    return true;
+  }
+
+  setObjectPosition(target: any, x: number, y: number, z: number): boolean {
+    if (target?.position?.set && typeof target.position.set === "function") {
+      target.position.set(x, y, z);
+      return true;
+    }
+
+    if (typeof target?.setPosition === "function") {
+      target.setPosition(x, y, z);
+      return true;
+    }
+
+    if (target?.position) {
+      target.position.x = x;
+      target.position.y = y;
+      target.position.z = z;
+      return true;
+    }
+
+    return false;
+  }
+
+  supportsObjectLayerIsolation(camera: I3DCamera, objects: I3DObject[]): boolean {
+    const anyCamera = camera as any;
+    if (!anyCamera?.layers || typeof anyCamera.layers.set !== "function") {
+      return false;
+    }
+    return objects.some((obj) => this.hasLayers(obj));
+  }
+
+  beginObjectLayerIsolation(
+    camera: I3DCamera,
+    objects: I3DObject[],
+    lights: I3DObject[],
+    layer: number,
+  ): I3DLayerIsolationState | null {
+    const anyCamera = camera as any;
+    if (!anyCamera?.layers || typeof anyCamera.layers.set !== "function") {
+      return null;
+    }
+
+    const restored = new Map<any, number>();
+    const apply = (target: any, mode: "set" | "enable") => {
+      if (!this.hasLayers(target)) return;
+      if (!restored.has(target)) {
+        restored.set(target, target.layers.mask);
+      }
+      if (mode === "set") {
+        target.layers.set(layer);
+      } else {
+        target.layers.enable(layer);
+      }
+    };
+
+    objects.forEach((obj) => apply(obj as any, "set"));
+    lights.forEach((light) => apply(light as any, "enable"));
+
+    const prevCameraMask = anyCamera.layers.mask;
+    anyCamera.layers.set(layer);
+
+    return {
+      cameraMask: prevCameraMask,
+      objectMasks: Array.from(restored.entries()).map(([object, mask]) => ({ object, mask })),
+    };
+  }
+
+  endObjectLayerIsolation(camera: I3DCamera, state: I3DLayerIsolationState): void {
+    const anyCamera = camera as any;
+    const anyState = state as any;
+
+    if (Array.isArray(anyState?.objectMasks)) {
+      anyState.objectMasks.forEach((entry: any) => {
+        const object = entry?.object;
+        const mask = entry?.mask;
+        if (this.hasLayers(object) && typeof mask === "number") {
+          object.layers.mask = mask;
+        }
+      });
+    }
+
+    if (anyCamera?.layers && typeof anyState?.cameraMask === "number") {
+      anyCamera.layers.mask = anyState.cameraMask;
+    }
+  }
+
+  applyMaterialProps(material: I3DMaterial, props: I3DMaterialVisualProps): boolean {
+    const mat = material as any;
+    if (!mat) return false;
+
+    let applied = false;
+
+    if (typeof props.opacity === "number" && Number.isFinite(props.opacity)) {
+      mat.opacity = props.opacity;
+      if ("transparent" in mat) {
+        mat.transparent = props.opacity < 1;
+      }
+      applied = true;
+    }
+
+    if (props.color && mat.color && typeof mat.color.set === "function") {
+      try {
+        mat.color.set(props.color);
+        applied = true;
+      } catch { }
+    }
+
+    if (typeof props.metalness === "number" && Number.isFinite(props.metalness) && "metalness" in mat) {
+      mat.metalness = props.metalness;
+      applied = true;
+    }
+
+    if (typeof props.roughness === "number" && Number.isFinite(props.roughness) && "roughness" in mat) {
+      mat.roughness = props.roughness;
+      applied = true;
+    }
+
+    if (props.emissive && mat.emissive && typeof mat.emissive.set === "function") {
+      try {
+        mat.emissive.set(props.emissive);
+        applied = true;
+      } catch { }
+    }
+
+    return applied;
+  }
+
+  private hasLayers(target: any): boolean {
+    return !!target?.layers && typeof target.layers.set === "function";
+  }
+
   simplifyGeometry(geometry: I3DGeometry, quality: number): I3DGeometry | null {
     const Modifier = (this.THREE as any)?.SimplifyModifier;
     if (!Modifier) return null;
@@ -2012,6 +2251,58 @@ export class ThreeJSEngine implements I3DEngine {
 
     return hasBox ? boundingBox : new this.THREE.Box3();
   }
+
+  getBackend(): I3DBackend {
+    return "webgl";
+  }
+
+  getCapabilities(): I3DEngineCapabilities {
+    return {
+      renderTargets: true,
+      shaderMaterials: true,
+      postProcess: true,
+      customMaterialFactory: true,
+      particles: true,
+      text: true,
+      geometrySimplify: !!(this.THREE as any)?.SimplifyModifier,
+    };
+  }
+
+  getPostProcessRuntime(): I3DPostProcessRuntime {
+    return {
+      isSupported: (renderer: I3DRenderer) => typeof renderer.setRenderTarget === "function",
+      createRenderTarget: (width: number, height: number, options?: any) =>
+        this.createRenderTarget(width, height, options),
+      createShaderMaterial: (params?: any) => this.createShaderMaterial(params),
+      setRenderTarget: (renderer: I3DRenderer, target: I3DRenderTarget | null) => {
+        renderer.setRenderTarget?.(target);
+      },
+      clear: (renderer: I3DRenderer, color = true, depth = true, stencil = true) => {
+        renderer.clear?.(color, depth, stencil);
+      },
+      createPipeline: ({ engine, renderer, width, height, customFilterRegistry }) =>
+        new ThreePostProcessPipeline({
+          engine,
+          renderer,
+          runtime: this.getPostProcessRuntime(),
+          width,
+          height,
+          customFilterRegistry,
+        }),
+    };
+  }
+
+  getCustomFilterRegistry(): I3DCustomFilterRegistryRuntime {
+    return {
+      get: (name: string) => String3DCustomFilterRegistry.get(name),
+    };
+  }
+
+  getCustomMaterialRegistry(): I3DCustomMaterialRegistryRuntime {
+    return {
+      get: (name: string) => String3DCustomMaterialRegistry.get(name),
+    };
+  }
 }
 
 export class ThreeJSProvider implements I3DEngineProvider {
@@ -2021,11 +2312,31 @@ export class ThreeJSProvider implements I3DEngineProvider {
     this.engine = new ThreeJSEngine(THREE, loaders);
   }
 
+  initialize(): void { }
+
   getEngine(): I3DEngine {
     return this.engine;
   }
 
   getName(): string {
     return "Three.js";
+  }
+
+  getBackend(): I3DBackend {
+    return this.engine.getBackend?.() ?? "webgl";
+  }
+
+  getCapabilities(): I3DEngineCapabilities {
+    return (
+      this.engine.getCapabilities?.() || {
+        renderTargets: false,
+        shaderMaterials: false,
+        postProcess: false,
+        customMaterialFactory: false,
+        particles: false,
+        text: false,
+        geometrySimplify: false,
+      }
+    );
   }
 }

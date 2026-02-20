@@ -1,16 +1,23 @@
 import {
+  I3DCustomMaterialRegistryRuntime,
   I3DEngine,
   I3DScene,
   I3DLight,
   I3DMaterial,
   I3DModelLoader,
+  I3DModelLoaderOptions,
   I3DVector3,
 } from "./abstractions/I3DEngine";
 import { String3DObject } from "./String3DObject";
-import { StringObject } from "@fiddle-digital/string-tune";
 import { readBooleanStyle, readNumberStyle, readStringStyle } from "../modules/string3d/styleUtils";
 import { String3DCustomMaterialRegistry, IMaterialInstance } from "./materials";
 import type { String3DSynchronizer } from "./synchronizer/String3DSynchronizer";
+
+type String3DSourceObject = {
+  id: string;
+  htmlElement: HTMLElement | null;
+  getProperty<T>(name: string): T;
+};
 
 export interface String3DSceneOptions {
   modelLoader?: I3DModelLoader;
@@ -28,6 +35,7 @@ export class String3DScene {
   private _modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
   private _modelLoaderCache: Map<string, I3DModelLoader> = new Map();
   private _synchronizer?: String3DSynchronizer;
+  private customMaterialRegistry: I3DCustomMaterialRegistryRuntime;
 
   public get rootObjects(): String3DObject[] {
     return this._rootObjects;
@@ -35,6 +43,8 @@ export class String3DScene {
 
   constructor(engine: I3DEngine, options: String3DSceneOptions = {}) {
     this.engine = engine;
+    this.customMaterialRegistry =
+      this.engine.getCustomMaterialRegistry?.() || String3DCustomMaterialRegistry;
     this._modelLoader = options.modelLoader;
     this._modelLoaderFactory = options.modelLoaderFactory;
     this._scene = engine.createScene();
@@ -93,7 +103,7 @@ export class String3DScene {
     return false;
   }
 
-  public createFromElement(object: StringObject): void {
+  public createFromElement(object: String3DSourceObject): void {
     const type = object.getProperty<string>("3d");
     if (!type) return;
 
@@ -115,50 +125,59 @@ export class String3DScene {
       }
     };
 
-    switch (type) {
-      case "group":
-        this.createGroup(object, onAdd);
-        break;
-      case "pointLight":
-        this.createLight(object, "point", onAdd);
-        break;
-      case "ambientLight":
-        this.createLight(object, "ambient", onAdd);
-        break;
-      case "directionalLight":
-        this.createLight(object, "directional", onAdd);
-        break;
-      case "spotLight":
-        this.createLight(object, "spot", onAdd);
-        break;
-      case "hemisphereLight":
-        this.createLight(object, "hemisphere", onAdd);
-        break;
-      case "model":
-        this.createModel(object, onAdd);
-        break;
-      case "box":
-        this.createBox(object, onAdd);
-        break;
-      case "sphere":
-        this.createSphere(object, onAdd);
-        break;
-      case "plane":
-        this.createPlane(object, onAdd);
-        break;
-      case "cylinder":
-        this.createCylinder(object, onAdd);
-        break;
-      case "particles":
-        this.createParticles(object, onAdd);
-        break;
-      case "text":
-        this.createText(object, onAdd);
-        break;
+    try {
+      switch (type) {
+        case "group":
+          this.createGroup(object, onAdd);
+          break;
+        case "pointLight":
+          this.createLight(object, "point", onAdd);
+          break;
+        case "ambientLight":
+          this.createLight(object, "ambient", onAdd);
+          break;
+        case "directionalLight":
+          this.createLight(object, "directional", onAdd);
+          break;
+        case "spotLight":
+          this.createLight(object, "spot", onAdd);
+          break;
+        case "hemisphereLight":
+          this.createLight(object, "hemisphere", onAdd);
+          break;
+        case "model":
+          this.createModel(object, onAdd);
+          break;
+        case "box":
+          this.createBox(object, onAdd);
+          break;
+        case "sphere":
+          this.createSphere(object, onAdd);
+          break;
+        case "plane":
+          this.createPlane(object, onAdd);
+          break;
+        case "cylinder":
+          this.createCylinder(object, onAdd);
+          break;
+        case "particles":
+          this.createParticles(object, onAdd);
+          break;
+        case "text":
+          this.createText(object, onAdd);
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+
     }
   }
 
-  private createGroup(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
+  private createGroup(
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
+  ): String3DObject {
     const group = this.engine.createGroup();
     const obj = new String3DObject(object.id, "group", group, this.engine);
     onAdd(obj);
@@ -166,9 +185,9 @@ export class String3DScene {
   }
 
   private createLight(
-    object: StringObject,
+    object: String3DSourceObject,
     kind: "point" | "ambient" | "directional" | "spot" | "hemisphere",
-    onAdd: (obj: String3DObject) => void
+    onAdd: (obj: String3DObject) => void,
   ): String3DObject {
     const element = object.htmlElement;
     const colorRaw = element ? readStringStyle(element, "--light-color", "#ffffff") : "#ffffff";
@@ -213,7 +232,7 @@ export class String3DScene {
     return obj;
   }
 
-  private applyShadowProps(object: StringObject, mesh: any): void {
+  private applyShadowProps(object: String3DSourceObject, mesh: any): void {
     const element = object.htmlElement;
     const castShadow = element ? readBooleanStyle(element, "--shadow-cast", false) : false;
     const receiveShadow = element ? readBooleanStyle(element, "--shadow-receive", false) : false;
@@ -221,7 +240,10 @@ export class String3DScene {
     mesh.receiveShadow = receiveShadow;
   }
 
-  private createBox(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
+  private createBox(
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
+  ): String3DObject {
     const geometry = this.engine.createBoxGeometry(1, 1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
@@ -234,7 +256,10 @@ export class String3DScene {
     return obj;
   }
 
-  private createSphere(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
+  private createSphere(
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
+  ): String3DObject {
     const quality = this.getGeometryQuality(object.htmlElement);
     const widthSegments = Math.max(3, Math.round(32 * quality));
     const heightSegments = Math.max(2, Math.round(32 * quality));
@@ -250,7 +275,10 @@ export class String3DScene {
     return obj;
   }
 
-  private createPlane(object: StringObject, onAdd: (obj: String3DObject) => void): String3DObject {
+  private createPlane(
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
+  ): String3DObject {
     const geometry = this.engine.createPlaneGeometry(1, 1);
     const material = this.createMaterialFromObject(object);
     const mesh = this.engine.createMesh(geometry, material);
@@ -264,8 +292,8 @@ export class String3DScene {
   }
 
   private createCylinder(
-    object: StringObject,
-    onAdd: (obj: String3DObject) => void
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
   ): String3DObject {
     const quality = this.getGeometryQuality(object.htmlElement);
     const segments = Math.max(3, Math.round(32 * quality));
@@ -281,7 +309,7 @@ export class String3DScene {
     return obj;
   }
 
-  private createModel(object: StringObject, onAdd: (obj: String3DObject) => void): void {
+  private createModel(object: String3DSourceObject, onAdd: (obj: String3DObject) => void): void {
     const modelPath = object.getProperty<string>("3d-model");
     if (!modelPath) return;
 
@@ -293,14 +321,19 @@ export class String3DScene {
 
     const element = object.htmlElement;
     if (element) {
-      this.applyModelTextureRemap(loader, element);
+      const loaderOptions = this.parseModelLoaderOptions(element);
+      if (loaderOptions) {
+        this.engine.configureModelLoader?.(loader, loaderOptions);
+      }
     }
     const shouldCenter = object.getProperty<boolean>("3d-model-center") ?? false;
 
     loader.load(
       modelPath,
-      (gltf: any) => {
-        const root = gltf?.scene || gltf?.object || gltf;
+      (loadedModel: any) => {
+        const root =
+          this.engine.resolveLoadedModelRoot?.(loadedModel) ||
+          (loadedModel && typeof loadedModel === "object" ? loadedModel : null);
         if (!root) {
           return;
         }
@@ -309,17 +342,12 @@ export class String3DScene {
           element && this.shouldOverrideModelMaterial(element)
             ? this.createMaterialFromElement(element, object)
             : null;
-
-        if (typeof root.traverse === "function") {
-          root.traverse((child: any) => {
-            if (child.isMesh) {
-              if (overrideMaterial) {
-                child.material = overrideMaterial;
-              }
-              this.applyShadowProps(object, child);
-            }
-          });
-        }
+        this.engine.forEachMesh(root, (mesh) => {
+          if (overrideMaterial) {
+            (mesh as any).material = overrideMaterial;
+          }
+          this.applyShadowProps(object, mesh);
+        });
 
         if (shouldCenter) {
           this.centerObject(root);
@@ -328,11 +356,14 @@ export class String3DScene {
         onAdd(obj);
       },
       undefined,
-      undefined
+      undefined,
     );
   }
 
-  private createParticles(object: StringObject, onAdd: (obj: String3DObject) => void): void {
+  private createParticles(
+    object: String3DSourceObject,
+    onAdd: (obj: String3DObject) => void,
+  ): void {
     if (!this.engine.createParticleSystem) {
       return;
     }
@@ -383,7 +414,7 @@ export class String3DScene {
     onAdd(obj);
   }
 
-  private createText(object: StringObject, onAdd: (obj: String3DObject) => void): void {
+  private createText(object: String3DSourceObject, onAdd: (obj: String3DObject) => void): void {
     if (!this.engine.createTextGeometry) {
       return;
     }
@@ -394,7 +425,6 @@ export class String3DScene {
     this.applyShadowProps(object, mesh);
 
     const group = this.engine.createGroup();
-    (group as any).__textMesh = mesh;
     group.add(mesh);
 
     const obj = new String3DObject(object.id, "text", group, this.engine, {
@@ -453,13 +483,13 @@ export class String3DScene {
     return center;
   }
 
-  private createMaterialFromObject(object: StringObject): I3DMaterial {
+  private createMaterialFromObject(object: String3DSourceObject): I3DMaterial {
     return this.createMaterialFromElement(object.htmlElement, object);
   }
 
   private createMaterialFromElement(
     element: HTMLElement | null,
-    object?: StringObject
+    object?: String3DSourceObject,
   ): I3DMaterial {
     const style = element ? getComputedStyle(element) : null;
     const getCSS = (prop: string) => (style ? style.getPropertyValue(prop).trim() : "");
@@ -513,7 +543,12 @@ export class String3DScene {
     }
 
     if (finalType === "standard") {
-      if (mapSrc) params.map = this.loadTexture(mapSrc, { flipY, colorSpace });
+      if (mapSrc) {
+        params.map = this.loadTexture(mapSrc, {
+          flipY,
+          colorSpace: colorSpace || "srgb",
+        });
+      }
       if (normalMapSrc) params.normalMap = this.loadTexture(normalMapSrc, { flipY });
       if (roughnessMapSrc) params.roughnessMap = this.loadTexture(roughnessMapSrc, { flipY });
       if (metalnessMapSrc) params.metalnessMap = this.loadTexture(metalnessMapSrc, { flipY });
@@ -533,9 +568,9 @@ export class String3DScene {
     type: string,
     element: HTMLElement | null,
     style: CSSStyleDeclaration | null,
-    object?: StringObject
+    object?: String3DSourceObject,
   ): I3DMaterial | null {
-    const definition = String3DCustomMaterialRegistry.get(type);
+    const definition = this.customMaterialRegistry.get(type);
     if (!definition) {
       return null;
     }
@@ -580,7 +615,7 @@ export class String3DScene {
     }
     this._materialInstances.delete(object.id);
 
-    let stringObject: StringObject | undefined;
+    let stringObject: String3DSourceObject | undefined;
     for (const [id, el] of this._elementMap) {
       if (id === object.id && el === element) {
         stringObject = (el as any).__stringObject || (el as any).stringObject;
@@ -590,16 +625,15 @@ export class String3DScene {
 
     const newMaterial = this.createMaterialFromElement(element, stringObject);
 
-    if (object.object && object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child.material) {
-          if (child.material.dispose) {
-            child.material.dispose();
-          }
-          child.material = newMaterial;
-        }
-      });
-    }
+    this.engine.forEachMesh(object.object, (mesh) => {
+      const current = (mesh as any).material;
+      if (Array.isArray(current)) {
+        current.forEach((mat: any) => mat?.dispose?.());
+      } else {
+        current?.dispose?.();
+      }
+      (mesh as any).material = newMaterial;
+    });
 
     object.material = newMaterial;
   }
@@ -651,29 +685,25 @@ export class String3DScene {
     return cssVars.some((prop) => hasStyle(prop));
   }
 
-  private applyModelTextureRemap(loader: any, element: HTMLElement): void {
+  private parseModelLoaderOptions(element: HTMLElement): I3DModelLoaderOptions | null {
     const baseRaw = (element.getAttribute("string-3d-model-texture-base") || "").trim();
-    const base = baseRaw ? baseRaw.replace(/\/?$/, "/") : "";
     const mappingRaw = element.getAttribute("string-3d-model-textures");
-    let mapping: Record<string, string> | null = null;
+    const options: I3DModelLoaderOptions = {};
+
+    if (baseRaw) {
+      options.textureBaseUrl = baseRaw.replace(/\/?$/, "/");
+    }
 
     if (mappingRaw) {
       try {
-        mapping = JSON.parse(mappingRaw);
-      } catch (error) {}
+        const parsed = JSON.parse(mappingRaw);
+        if (parsed && typeof parsed === "object") {
+          options.textureMap = parsed as Record<string, string>;
+        }
+      } catch (error) { }
     }
 
-    const manager = loader?.manager;
-    if (!manager || typeof manager.setURLModifier !== "function") {
-      return;
-    }
-
-    manager.setURLModifier((url: string) => {
-      const mapped = mapping && url in mapping ? mapping[url] : url;
-      if (!base) return mapped;
-      if (/^(blob:|data:|https?:|file:|\/)/i.test(mapped)) return mapped;
-      return base + mapped.replace(/^\.?\//, "");
-    });
+    return options.textureBaseUrl || options.textureMap ? options : null;
   }
 
   public destroy(): void {

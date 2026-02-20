@@ -1,4 +1,5 @@
 import { String3DObject } from "../../core/String3DObject";
+import type { I3DCustomFilterRegistryRuntime } from "../../core/abstractions/I3DEngine";
 import { String3DCustomFilterRegistry } from "../../core/filters/String3DCustomFilter";
 import {
   String3DFilterChain,
@@ -28,14 +29,19 @@ type FilterTransitionState = {
 export class FilterController {
   private filterStates: WeakMap<HTMLElement, FilterTransitionState> = new WeakMap();
   private filterWarnings: WeakMap<HTMLElement, string> = new WeakMap();
+  private customFilterRegistry: I3DCustomFilterRegistryRuntime = String3DCustomFilterRegistry;
 
   constructor(private easingParser?: (value: string) => (t: number) => number) {}
+
+  setCustomFilterRegistry(registry: I3DCustomFilterRegistryRuntime | null | undefined): void {
+    this.customFilterRegistry = registry || String3DCustomFilterRegistry;
+  }
 
   collectTargets(
     rootObjects: String3DObject[],
     now: number,
     useDirtySync: boolean,
-    dirtySet: Set<HTMLElement> | null
+    dirtySet: Set<HTMLElement> | null,
   ): String3DFilterTarget[] {
     const targets: String3DFilterTarget[] = [];
     const walk = (obj: String3DObject): void => {
@@ -71,7 +77,7 @@ export class FilterController {
   private readFilterChain(
     el: HTMLElement,
     now: number,
-    shouldReadStyle: boolean
+    shouldReadStyle: boolean,
   ): String3DFilterChain | null {
     const existing = this.filterStates.get(el);
     if (!shouldReadStyle && existing) {
@@ -347,7 +353,7 @@ export class FilterController {
         if (angle !== null) effects.push({ type: "hue-rotate", angle });
         else warnings.push(`[String3D] Invalid hue-rotate value "${args}".`);
       } else if (name) {
-        const custom = String3DCustomFilterRegistry.get(name);
+        const custom = this.customFilterRegistry.get(name);
         if (custom) {
           const parsed = custom.parse ? custom.parse(args) : {};
           if (parsed === null) {
@@ -438,7 +444,7 @@ export class FilterController {
   }
 
   private parseTransitionShorthand(
-    value: string
+    value: string,
   ): Map<string, { duration: number; delay: number; easing: (t: number) => number }> {
     const map = new Map<
       string,
@@ -504,7 +510,7 @@ export class FilterController {
         const otherKeys = Object.keys(other.uniforms || {});
         if (keys.length !== otherKeys.length) return false;
         return keys.every(
-          (key) => key in (other.uniforms || {}) && this.isNumeric(effect.uniforms?.[key])
+          (key) => key in (other.uniforms || {}) && this.isNumeric(effect.uniforms?.[key]),
         );
       }
       return true;
@@ -586,7 +592,7 @@ export class FilterController {
   private interpolateChain(
     from: String3DFilterChain,
     to: String3DFilterChain,
-    t: number
+    t: number,
   ): String3DFilterChain {
     if (!this.canInterpolate(from, to)) return to;
     return from.map((effect, index) => this.interpolateEffect(effect, to[index], t));
@@ -595,7 +601,7 @@ export class FilterController {
   private interpolateEffect(
     from: String3DFilterEffect,
     to: String3DFilterEffect,
-    t: number
+    t: number,
   ): String3DFilterEffect {
     const lerp = (a: number, b: number) => a + (b - a) * t;
     if (from.type === "blur" && to.type === "blur") {

@@ -1,6 +1,22 @@
+import type { I3DBackend } from "../abstractions/I3DEngine";
+
+export type String3DCustomFilterImplementation = {
+  kind: "shader";
+  language: "glsl" | "wgsl" | "custom";
+  stage?: "fragment" | "pipeline";
+  code: string;
+  vertexCode?: string;
+  entryPoint?: string;
+  metadata?: Record<string, any>;
+};
+
 export type String3DCustomFilterDefinition = {
   name: string;
-  fragmentShader: string;
+  implementations?: Partial<Record<I3DBackend, String3DCustomFilterImplementation>>;
+  /**
+   * @deprecated Use `implementations.webgl` instead.
+   */
+  fragmentShader?: string;
   uniforms?: Record<string, any>;
   parse?: (args: string) => Record<string, any> | null;
 };
@@ -26,5 +42,24 @@ export class String3DCustomFilterRegistry {
 
   static list(): String3DCustomFilterDefinition[] {
     return Array.from(this.filters.values());
+  }
+
+  static getImplementation(
+    name: string,
+    backend: I3DBackend,
+  ): String3DCustomFilterImplementation | undefined {
+    const def = this.get(name);
+    if (!def) return undefined;
+    const impl = def.implementations?.[backend] || def.implementations?.custom;
+    if (impl) return impl;
+    if (def.fragmentShader && backend === "webgl") {
+      return {
+        kind: "shader",
+        language: "glsl",
+        stage: "fragment",
+        code: def.fragmentShader,
+      };
+    }
+    return undefined;
   }
 }

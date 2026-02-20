@@ -31,23 +31,28 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
     const rect = cached ? cached.rect : el.getBoundingClientRect();
     const bundle = this.readStyleBundle(el, ctx, object);
 
-    const screenCenterX = rect.left + rect.width * 0.5;
-    const screenCenterY = rect.top + rect.height * 0.5;
+    const screenAnchor = this.resolveScreenAnchor(rect, ctx);
+    const translateX = screenAnchor.fallbackToViewportCenter ? bundle.translateX : 0;
+    const translateY = screenAnchor.fallbackToViewportCenter ? bundle.translateY : 0;
 
     if (ctx.camera.getMode() === "orthographic") {
-      object.object.position.set(
-        screenCenterX - ctx.viewportWidth / 2 + bundle.translateX,
-        -(screenCenterY - ctx.viewportHeight / 2) + bundle.translateY,
-        bundle.translateZ
+      this.setObjectPosition(
+        ctx,
+        object.object,
+        screenAnchor.x - ctx.viewportWidth / 2 + translateX,
+        -(screenAnchor.y - ctx.viewportHeight / 2) + translateY,
+        bundle.translateZ,
       );
     } else {
       const frustum = ctx.camera.getFrustumSizeAt(bundle.translateZ);
-      const normalizedX = screenCenterX / ctx.viewportWidth;
-      const normalizedY = screenCenterY / ctx.viewportHeight;
-      object.object.position.set(
-        (normalizedX - 0.5) * frustum.width + bundle.translateX,
-        -(normalizedY - 0.5) * frustum.height + bundle.translateY,
-        bundle.translateZ
+      const normalizedX = screenAnchor.x / ctx.viewportWidth;
+      const normalizedY = screenAnchor.y / ctx.viewportHeight;
+      this.setObjectPosition(
+        ctx,
+        object.object,
+        (normalizedX - 0.5) * frustum.width + translateX,
+        -(normalizedY - 0.5) * frustum.height + translateY,
+        bundle.translateZ,
       );
     }
 
@@ -109,24 +114,27 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
         const tCached = (targetEl as any).__layoutCache;
         const tRect = tCached ? tCached.rect : targetEl.getBoundingClientRect();
         const tStyles = new StyleReader(targetEl as HTMLElement);
+        const tTranslateX = tStyles.readNumber("--translate-x", 0);
+        const tTranslateY = tStyles.readNumber("--translate-y", 0);
         const tTranslateZ = tStyles.readNumber("--translate-z", 0);
 
-        const tScreenCenterX = tRect.left + tRect.width * 0.5;
-        const tScreenCenterY = tRect.top + tRect.height * 0.5;
+        const tScreenAnchor = this.resolveScreenAnchor(tRect, ctx);
+        const tOffsetX = tScreenAnchor.fallbackToViewportCenter ? tTranslateX : 0;
+        const tOffsetY = tScreenAnchor.fallbackToViewportCenter ? tTranslateY : 0;
 
         let x: number;
         let y: number;
         let z: number;
         if (ctx.camera.getMode() === "orthographic") {
-          x = tScreenCenterX - ctx.viewportWidth / 2;
-          y = -(tScreenCenterY - ctx.viewportHeight / 2);
+          x = tScreenAnchor.x - ctx.viewportWidth / 2 + tOffsetX;
+          y = -(tScreenAnchor.y - ctx.viewportHeight / 2) + tOffsetY;
           z = tTranslateZ;
         } else {
           const frustum = ctx.camera.getFrustumSizeAt(tTranslateZ);
-          const normalizedX = tScreenCenterX / ctx.viewportWidth;
-          const normalizedY = tScreenCenterY / ctx.viewportHeight;
-          x = (normalizedX - 0.5) * frustum.width;
-          y = -(normalizedY - 0.5) * frustum.height;
+          const normalizedX = tScreenAnchor.x / ctx.viewportWidth;
+          const normalizedY = tScreenAnchor.y / ctx.viewportHeight;
+          x = (normalizedX - 0.5) * frustum.width + tOffsetX;
+          y = -(normalizedY - 0.5) * frustum.height + tOffsetY;
           z = tTranslateZ;
         }
 
@@ -136,7 +144,7 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
           z += bundle.targetOffset.z;
         }
 
-        light.target.position.set(x, y, z);
+        this.setObjectPosition(ctx, light.target, x, y, z);
 
         light.target.updateMatrixWorld(true);
       }
@@ -148,7 +156,7 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
   private readStyleBundle(
     el: HTMLElement,
     ctx: SyncContext,
-    object: String3DObject
+    object: String3DObject,
   ): LightStyleBundle {
     return LightSynchronizer.styleCache.get(el, ctx, (el) => {
       const styles = new StyleReader(el);
@@ -183,7 +191,7 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
         bundle.shadowBias = styles.readNumber("--shadow-bias", light.shadow.bias ?? 0);
         bundle.shadowMapSize = styles.readNumber(
           "--shadow-map-size",
-          light.shadow.mapSize.width ?? 512
+          light.shadow.mapSize.width ?? 512,
         );
       }
 
@@ -207,5 +215,47 @@ export class LightSynchronizer implements String3DObjectSyncStrategy {
       .map((part) => Number.parseFloat(part));
     if (parts.length < 3 || parts.some((num) => Number.isNaN(num))) return null;
     return { x: parts[0], y: parts[1], z: parts[2] };
+  }
+
+  private resolveScreenAnchor(
+    rect: DOMRect,
+    ctx: SyncContext,
+  ): { x: number; y: number; fallbackToViewportCenter: boolean } {
+    const hasRenderableArea = rect.width > 1 && rect.height > 1;
+    if (!hasRenderableArea) {
+      return {
+        x: ctx.viewportWidth * 0.5,
+        y: ctx.viewportHeight * 0.5,
+        fallbackToViewportCenter: true,
+      };
+    }
+
+    return {
+      x: rect.left + rect.width * 0.5,
+      y: rect.top + rect.height * 0.5,
+      fallbackToViewportCenter: false,
+    };
+  }
+
+  private setObjectPosition(ctx: SyncContext, target: any, x: number, y: number, z: number): void {
+    if (ctx.engine.setObjectPosition?.(target, x, y, z)) {
+      return;
+    }
+
+    if (target?.position?.set && typeof target.position.set === "function") {
+      target.position.set(x, y, z);
+      return;
+    }
+
+    if (typeof target?.setPosition === "function") {
+      target.setPosition(x, y, z);
+      return;
+    }
+
+    if (target?.position) {
+      target.position.x = x;
+      target.position.y = y;
+      target.position.z = z;
+    }
   }
 }

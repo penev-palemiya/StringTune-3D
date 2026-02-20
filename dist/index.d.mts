@@ -1,4 +1,4 @@
-import { StringObject, StringModule, StringContext, StringData } from '@fiddle-digital/string-tune';
+import { StringModule, StringContext, StringObject, StringData } from '@fiddle-digital/string-tune';
 
 type UniformType = "float" | "int" | "vec2" | "vec3" | "vec4" | "color" | "texture" | "mat3" | "mat4";
 type UniformDefinition = {
@@ -16,18 +16,33 @@ type MaterialBlendMode = "normal" | "additive" | "subtractive" | "multiply";
 type MaterialSide = "front" | "back" | "double";
 type String3DCustomMaterialDefinition = {
     name: string;
-    extends?: "basic" | "standard" | "physical" | "shader";
+    extends?: "basic" | "standard" | "physical" | "transmission" | "shader";
     vertexShader?: string;
     fragmentShader?: string;
     injections?: ShaderInjection[];
     uniforms?: Record<string, UniformDefinition>;
     properties?: {
         transparent?: boolean;
+        opacity?: number;
         side?: MaterialSide;
         depthWrite?: boolean;
         depthTest?: boolean;
         blending?: MaterialBlendMode;
         wireframe?: boolean;
+        color?: string | number;
+        emissive?: string | number;
+        metalness?: number;
+        roughness?: number;
+        transmission?: number;
+        thickness?: number;
+        ior?: number;
+        reflectivity?: number;
+        clearcoat?: number;
+        clearcoatRoughness?: number;
+        attenuationDistance?: number;
+        attenuationColor?: string | number;
+        transmissionSamples?: number;
+        transmissionSampler?: boolean;
     };
     lights?: boolean;
     parse?: (element: HTMLElement, style: CSSStyleDeclaration) => Record<string, any>;
@@ -56,7 +71,134 @@ interface IMaterialFactory {
     supports(definition: String3DCustomMaterialDefinition): boolean;
     create(definition: String3DCustomMaterialDefinition, initialUniforms?: Record<string, any>): IMaterialInstance;
     parseUniformsFromCSS(definition: String3DCustomMaterialDefinition, element: HTMLElement, style: CSSStyleDeclaration): Record<string, any>;
+    getMaterialDefinition?(material: any): String3DCustomMaterialDefinition | null;
+    applyUniforms?(material: any, definition: String3DCustomMaterialDefinition, values: Record<string, any>): void;
+    isShaderMaterial?(material: any): boolean;
 }
+
+type String3DCustomFilterImplementation = {
+    kind: "shader";
+    language: "glsl" | "wgsl" | "custom";
+    stage?: "fragment" | "pipeline";
+    code: string;
+    vertexCode?: string;
+    entryPoint?: string;
+    metadata?: Record<string, any>;
+};
+type String3DCustomFilterDefinition = {
+    name: string;
+    implementations?: Partial<Record<I3DBackend, String3DCustomFilterImplementation>>;
+    /**
+     * @deprecated Use `implementations.webgl` instead.
+     */
+    fragmentShader?: string;
+    uniforms?: Record<string, any>;
+    parse?: (args: string) => Record<string, any> | null;
+};
+declare class String3DCustomFilterRegistry {
+    private static filters;
+    static register(definition: String3DCustomFilterDefinition): void;
+    static get(name: string): String3DCustomFilterDefinition | undefined;
+    static has(name: string): boolean;
+    static list(): String3DCustomFilterDefinition[];
+    static getImplementation(name: string, backend: I3DBackend): String3DCustomFilterImplementation | undefined;
+}
+
+declare class String3DObject {
+    id: string;
+    type: string;
+    private _object;
+    private _material?;
+    private _geometry?;
+    private _texture?;
+    private _uniforms;
+    private _originalBoundingBox?;
+    private _quaternion;
+    private _originalSize;
+    private _bbox;
+    el: any;
+    private _children;
+    private _flatObjectsCache;
+    private _subtreeCache;
+    private engine;
+    get children(): String3DObject[];
+    constructor(id: string, type: string, object: I3DObject, engine: I3DEngine, options?: {
+        material?: I3DMaterial;
+        geometry?: I3DGeometry;
+        texture?: any;
+    });
+    get object(): I3DObject;
+    get material(): I3DMaterial | undefined;
+    get originalSize(): I3DVector3;
+    get boundingBox(): I3DBox3;
+    addChild(child: String3DObject): void;
+    getWorldMatrix(): I3DMatrix4;
+    getWorldPosition(): I3DVector3;
+    getOriginalBoundingBox(): I3DBox3;
+    syncTransformFromMatrix(matrix: I3DMatrix4): void;
+    applyWorldTransform(position: I3DVector3, quaternion: I3DQuaternion, scale: I3DVector3): void;
+    set quaternion(quaternion: I3DQuaternion);
+    set position(position: I3DVector3);
+    set scale(scale: I3DVector3);
+    set rotation(euler: I3DEuler);
+    set opacity(value: number);
+    set metalness(value: number);
+    set roughness(value: number);
+    set texture(texture: any);
+    set material(material: I3DMaterial | undefined);
+    set geometry(geometry: I3DGeometry | undefined);
+    updateBoundingBox(): void;
+    destroy(): void;
+    getFlatObjects(): I3DObject[];
+    getSubtreeObjects(): I3DObject[];
+    private invalidateFlatCache;
+    private invalidateSubtreeCache;
+    private disposeObjectResources;
+}
+
+type String3DFilterEffect = {
+    type: "blur";
+    amount: number;
+} | {
+    type: "pixel";
+    size: number;
+} | {
+    type: "bloom";
+    intensity: number;
+    threshold: number;
+} | {
+    type: "brightness";
+    amount: number;
+} | {
+    type: "contrast";
+    amount: number;
+} | {
+    type: "saturate";
+    amount: number;
+} | {
+    type: "grayscale";
+    amount: number;
+} | {
+    type: "sepia";
+    amount: number;
+} | {
+    type: "invert";
+    amount: number;
+} | {
+    type: "hue-rotate";
+    angle: number;
+} | {
+    type: "custom";
+    name: string;
+    uniforms: Record<string, any>;
+};
+type String3DFilterChain = String3DFilterEffect[];
+type String3DFilterTarget = {
+    object: String3DObject;
+    effects: String3DFilterChain;
+    effectsKey: string;
+    dirty: boolean;
+};
 
 interface I3DVector3 {
     x: number;
@@ -238,6 +380,17 @@ interface I3DRenderer {
 interface I3DTextureLoader {
     load(url: string, onLoad?: (texture: any) => void): any;
 }
+type I3DMaterialVisualProps = {
+    opacity?: number;
+    color?: string;
+    metalness?: number;
+    roughness?: number;
+    emissive?: string;
+};
+type I3DModelLoaderOptions = {
+    textureBaseUrl?: string;
+    textureMap?: Record<string, string>;
+};
 type TextGeometryOptions = {
     size: number;
     height: number;
@@ -262,6 +415,53 @@ type TextGeometryOptions = {
 interface I3DModelLoader {
     load(url: string, onLoad?: (model: any) => void, onProgress?: (progress: any) => void, onError?: (error: any) => void): void;
 }
+type I3DBackend = "webgl" | "webgpu" | "custom";
+type I3DEngineCapabilities = {
+    renderTargets: boolean;
+    shaderMaterials: boolean;
+    postProcess: boolean;
+    customMaterialFactory: boolean;
+    particles: boolean;
+    text: boolean;
+    geometrySimplify: boolean;
+};
+interface I3DPostProcessRuntime {
+    isSupported(renderer: I3DRenderer): boolean;
+    createRenderTarget(width: number, height: number, options?: any): I3DRenderTarget;
+    createShaderMaterial(params?: any): I3DMaterial;
+    setRenderTarget(renderer: I3DRenderer, target: I3DRenderTarget | null): void;
+    clear(renderer: I3DRenderer, color?: boolean, depth?: boolean, stencil?: boolean): void;
+    createPipeline?(context: {
+        engine: I3DEngine;
+        renderer: I3DRenderer;
+        width: number;
+        height: number;
+        customFilterRegistry: I3DCustomFilterRegistryRuntime;
+    }): I3DPostProcessPipelineRuntime | null;
+}
+interface I3DPostProcessPipelineRuntime {
+    isSupported(): boolean;
+    resize(width: number, height: number): void;
+    setScale(scale: number): void;
+    applyFilters(input: I3DRenderTarget, effects: String3DFilterChain, quality?: number): I3DRenderTarget;
+    acquireTarget(): I3DRenderTarget;
+    releaseTarget(target: I3DRenderTarget): void;
+    renderToScreen(input: I3DRenderTarget): void;
+    dispose(): void;
+}
+interface I3DCustomFilterRegistryRuntime {
+    get(name: string): String3DCustomFilterDefinition | undefined;
+}
+interface I3DCustomMaterialRegistryRuntime {
+    get(name: string): String3DCustomMaterialDefinition | undefined;
+}
+type I3DLayerIsolationState = unknown;
+type I3DRendererConfigContext = {
+    width: number;
+    height: number;
+    pixelRatio: number;
+    container: HTMLElement;
+};
 interface I3DEngine {
     createVector3(x?: number, y?: number, z?: number): I3DVector3;
     createVector2(x?: number, y?: number): I3DVector2;
@@ -275,6 +475,8 @@ interface I3DEngine {
         alpha?: boolean;
         logarithmicDepthBuffer?: boolean;
     }): I3DRenderer;
+    getRecommendedPixelRatio?(): number;
+    configureRenderer?(renderer: I3DRenderer, context: I3DRendererConfigContext): void;
     createPerspectiveCamera(fov?: number, aspect?: number, near?: number, far?: number): I3DPerspectiveCamera;
     createOrthographicCamera(left: number, right: number, top: number, bottom: number, near?: number, far?: number): I3DOrthographicCamera;
     createGroup(): I3DObject;
@@ -293,67 +495,44 @@ interface I3DEngine {
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
     createModelLoader(type: string): I3DModelLoader;
+    configureModelLoader?(loader: I3DModelLoader, options: I3DModelLoaderOptions): void;
+    resolveLoadedModelRoot?(loadedModel: any): I3DObject | null;
     createRenderTarget?(width: number, height: number, options?: any): I3DRenderTarget;
     getMaterialFactory?(): IMaterialFactory | null;
     createParticleSystem?(config: ParticleSystemConfig): I3DParticleSystem;
+    setObjectPosition?(target: any, x: number, y: number, z: number): boolean;
+    applyMaterialProps?(material: I3DMaterial, props: I3DMaterialVisualProps): boolean;
+    supportsObjectLayerIsolation?(camera: I3DCamera, objects: I3DObject[]): boolean;
+    beginObjectLayerIsolation?(camera: I3DCamera, objects: I3DObject[], lights: I3DObject[], layer: number): I3DLayerIsolationState | null;
+    endObjectLayerIsolation?(camera: I3DCamera, state: I3DLayerIsolationState): void;
+    forEachMesh(object: I3DObject, callback: (mesh: I3DMesh) => void): void;
+    forEachMaterial(object: I3DObject, callback: (material: I3DMaterial) => void): void;
+    getPrimaryMesh(object: I3DObject): I3DMesh | null;
+    applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean;
     loadFont?(url: string): Promise<any>;
     createTextGeometry?(text: string, font: any, options: TextGeometryOptions): I3DGeometry | null;
+    getTextGeometryLayoutSignature?(context: {
+        text: string;
+        layoutSignature: string;
+        layout: Array<{
+            char: string;
+            x: number;
+            y: number;
+            scale?: number;
+        }>;
+        elementWidth: number;
+        elementHeight: number;
+        fontSize: number;
+    }): string;
     simplifyGeometry?(geometry: I3DGeometry, quality: number): I3DGeometry | null;
     degToRad(degrees: number): number;
     radToDeg(radians: number): number;
     computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
-}
-
-declare class String3DObject {
-    id: string;
-    type: string;
-    private _object;
-    private _material?;
-    private _geometry?;
-    private _texture?;
-    private _uniforms;
-    private _originalBoundingBox?;
-    private _quaternion;
-    private _originalSize;
-    private _bbox;
-    el: any;
-    private _children;
-    private _flatObjectsCache;
-    private _subtreeCache;
-    private engine;
-    get children(): String3DObject[];
-    constructor(id: string, type: string, object: I3DObject, engine: I3DEngine, options?: {
-        material?: I3DMaterial;
-        geometry?: I3DGeometry;
-        texture?: any;
-    });
-    get object(): I3DObject;
-    get material(): I3DMaterial | undefined;
-    get originalSize(): I3DVector3;
-    get boundingBox(): I3DBox3;
-    addChild(child: String3DObject): void;
-    getWorldMatrix(): I3DMatrix4;
-    getWorldPosition(): I3DVector3;
-    getOriginalBoundingBox(): I3DBox3;
-    syncTransformFromMatrix(matrix: I3DMatrix4): void;
-    applyWorldTransform(position: I3DVector3, quaternion: I3DQuaternion, scale: I3DVector3): void;
-    set quaternion(quaternion: I3DQuaternion);
-    set position(position: I3DVector3);
-    set scale(scale: I3DVector3);
-    set rotation(euler: I3DEuler);
-    set opacity(value: number);
-    set metalness(value: number);
-    set roughness(value: number);
-    set texture(texture: any);
-    set material(material: I3DMaterial | undefined);
-    set geometry(geometry: I3DGeometry | undefined);
-    updateBoundingBox(): void;
-    destroy(): void;
-    getFlatObjects(): I3DObject[];
-    getSubtreeObjects(): I3DObject[];
-    private invalidateFlatCache;
-    private invalidateSubtreeCache;
-    private disposeObjectResources;
+    getBackend?(): I3DBackend;
+    getCapabilities?(): I3DEngineCapabilities;
+    getPostProcessRuntime?(): I3DPostProcessRuntime | null;
+    getCustomFilterRegistry?(): I3DCustomFilterRegistryRuntime | null;
+    getCustomMaterialRegistry?(): I3DCustomMaterialRegistryRuntime | null;
 }
 
 type CameraMode = "orthographic" | "perspective";
@@ -392,6 +571,7 @@ declare class String3DSynchronizer {
     private strategies;
     private styleReadIntervalMs;
     private layoutReadIntervalMs;
+    private scene?;
     constructor(camera: String3DCamera, viewportWidth: number, viewportHeight: number, engine: I3DEngine);
     syncElement(el: HTMLElement, object: String3DObject, parentData: any, hints?: {
         dirtySet?: Set<HTMLElement> | null;
@@ -401,10 +581,16 @@ declare class String3DSynchronizer {
         styleReadIntervalMs?: number;
         layoutReadIntervalMs?: number;
     }): void;
+    setScene(scene: String3DScene): void;
     updateViewportSize(width: number, height: number): void;
     cleanupElement(el: HTMLElement, object: String3DObject): void;
 }
 
+type String3DSourceObject = {
+    id: string;
+    htmlElement: HTMLElement | null;
+    getProperty<T>(name: string): T;
+};
 interface String3DSceneOptions {
     modelLoader?: I3DModelLoader;
     modelLoaderFactory?: (engine: I3DEngine, type?: string) => I3DModelLoader;
@@ -420,6 +606,7 @@ declare class String3DScene {
     private _modelLoaderFactory?;
     private _modelLoaderCache;
     private _synchronizer?;
+    private customMaterialRegistry;
     get rootObjects(): String3DObject[];
     constructor(engine: I3DEngine, options?: String3DSceneOptions);
     setSynchronizer(synchronizer: String3DSynchronizer): void;
@@ -429,7 +616,7 @@ declare class String3DScene {
     getAllObjects(): String3DObject[];
     hasObject(id: string): boolean;
     deleteObject(id: string): boolean;
-    createFromElement(object: StringObject): void;
+    createFromElement(object: String3DSourceObject): void;
     private createGroup;
     private createLight;
     private applyShadowProps;
@@ -453,13 +640,16 @@ declare class String3DScene {
     private loadTexture;
     private parseFlipY;
     private shouldOverrideModelMaterial;
-    private applyModelTextureRemap;
+    private parseModelLoaderOptions;
     destroy(): void;
 }
 
 interface I3DEngineProvider {
+    initialize?(): void | Promise<void>;
     getEngine(): I3DEngine;
     getName(): string;
+    getBackend?(): I3DBackend;
+    getCapabilities?(): I3DEngineCapabilities;
 }
 
 interface String3DOptions {
@@ -489,6 +679,8 @@ declare class String3D extends StringModule {
     private lastSyncData;
     private filterController;
     private needsInitialResize;
+    private providerBootstrapped;
+    private pendingConnectedObjects;
     static getInstance(): String3D | null;
     get scene(): String3DScene | null;
     static setProvider(provider: I3DEngineProvider): void;
@@ -501,6 +693,8 @@ declare class String3D extends StringModule {
     initializeObject(globalId: number, object: StringObject, element: HTMLElement, attributes: Record<string, any>): void;
     onResize(): void;
     onInit(): void;
+    private bootstrapProvider;
+    private flushPendingConnections;
     onSettingsChange(): void;
     private buildOptionsFromSettings;
     private getSettingValue;
@@ -517,56 +711,13 @@ declare class String3D extends StringModule {
     destroy(): void;
 }
 
-type String3DFilterEffect = {
-    type: "blur";
-    amount: number;
-} | {
-    type: "pixel";
-    size: number;
-} | {
-    type: "bloom";
-    intensity: number;
-    threshold: number;
-} | {
-    type: "brightness";
-    amount: number;
-} | {
-    type: "contrast";
-    amount: number;
-} | {
-    type: "saturate";
-    amount: number;
-} | {
-    type: "grayscale";
-    amount: number;
-} | {
-    type: "sepia";
-    amount: number;
-} | {
-    type: "invert";
-    amount: number;
-} | {
-    type: "hue-rotate";
-    angle: number;
-} | {
-    type: "custom";
-    name: string;
-    uniforms: Record<string, any>;
-};
-type String3DFilterChain = String3DFilterEffect[];
-type String3DFilterTarget = {
-    object: String3DObject;
-    effects: String3DFilterChain;
-    effectsKey: string;
-    dirty: boolean;
-};
-
 declare class String3DRenderer {
     private _container;
     private _renderer;
     private _width;
     private _height;
     private engine;
+    private postProcessRuntime;
     private filterPipeline;
     private filterCache;
     private frameId;
@@ -592,26 +743,6 @@ declare class String3DRenderer {
     private updateQuality;
     private invalidateFilterCache;
     private evictCache;
-    private supportsLayers;
-    private hasLayers;
-    private applyLayerMask;
-    private restoreLayerMask;
-    private setCameraLayer;
-    private restoreCameraLayer;
-}
-
-type String3DCustomFilterDefinition = {
-    name: string;
-    fragmentShader: string;
-    uniforms?: Record<string, any>;
-    parse?: (args: string) => Record<string, any> | null;
-};
-declare class String3DCustomFilterRegistry {
-    private static filters;
-    static register(definition: String3DCustomFilterDefinition): void;
-    static get(name: string): String3DCustomFilterDefinition | undefined;
-    static has(name: string): boolean;
-    static list(): String3DCustomFilterDefinition[];
 }
 
 type String3DFontEntry = {
@@ -690,6 +821,8 @@ declare class ThreeJSEngine implements I3DEngine {
         alpha?: boolean;
         logarithmicDepthBuffer?: boolean;
     }): I3DRenderer;
+    getRecommendedPixelRatio(): number;
+    configureRenderer(renderer: I3DRenderer, _context: I3DRendererConfigContext): void;
     createPerspectiveCamera(fov?: number, aspect?: number, near?: number, far?: number): I3DPerspectiveCamera;
     createOrthographicCamera(left: number, right: number, top: number, bottom: number, near?: number, far?: number): I3DOrthographicCamera;
     createGroup(): I3DObject;
@@ -708,6 +841,8 @@ declare class ThreeJSEngine implements I3DEngine {
     createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
     createTextureLoader(): I3DTextureLoader;
     createModelLoader(type: string): I3DModelLoader;
+    configureModelLoader(loader: I3DModelLoader, options: I3DModelLoaderOptions): void;
+    resolveLoadedModelRoot(loadedModel: any): I3DObject | null;
     createRenderTarget(width: number, height: number, options?: any): I3DRenderTarget;
     loadFont(url: string): Promise<any>;
     private loadFontWithConverter;
@@ -730,26 +865,48 @@ declare class ThreeJSEngine implements I3DEngine {
     private scaleShape;
     private resolveParticleModelGeometry;
     createParticleSystem(config: ParticleSystemConfig): I3DParticleSystem;
+    forEachMesh(object: I3DObject, callback: (mesh: I3DMesh) => void): void;
+    forEachMaterial(object: I3DObject, callback: (material: I3DMaterial) => void): void;
+    getPrimaryMesh(object: I3DObject): I3DMesh | null;
+    applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean;
+    setObjectPosition(target: any, x: number, y: number, z: number): boolean;
+    supportsObjectLayerIsolation(camera: I3DCamera, objects: I3DObject[]): boolean;
+    beginObjectLayerIsolation(camera: I3DCamera, objects: I3DObject[], lights: I3DObject[], layer: number): I3DLayerIsolationState | null;
+    endObjectLayerIsolation(camera: I3DCamera, state: I3DLayerIsolationState): void;
+    applyMaterialProps(material: I3DMaterial, props: I3DMaterialVisualProps): boolean;
+    private hasLayers;
     simplifyGeometry(geometry: I3DGeometry, quality: number): I3DGeometry | null;
     degToRad(degrees: number): number;
     radToDeg(radians: number): number;
     computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
+    getBackend(): I3DBackend;
+    getCapabilities(): I3DEngineCapabilities;
+    getPostProcessRuntime(): I3DPostProcessRuntime;
+    getCustomFilterRegistry(): I3DCustomFilterRegistryRuntime;
+    getCustomMaterialRegistry(): I3DCustomMaterialRegistryRuntime;
 }
 declare class ThreeJSProvider implements I3DEngineProvider {
     private engine;
     constructor(THREE: any, loaders?: Record<string, any>);
+    initialize(): void;
     getEngine(): I3DEngine;
     getName(): string;
+    getBackend(): I3DBackend;
+    getCapabilities(): I3DEngineCapabilities;
 }
 
 declare class ThreeJSMaterialFactory implements IMaterialFactory {
     private THREE;
     private textureLoader;
     private textureCache;
+    private meshTransmissionMaterialClass;
     constructor(THREE: any);
     supports(definition: String3DCustomMaterialDefinition): boolean;
     create(definition: String3DCustomMaterialDefinition, initialUniforms?: Record<string, any>): IMaterialInstance;
     parseUniformsFromCSS(definition: String3DCustomMaterialDefinition, element: HTMLElement, style: CSSStyleDeclaration): Record<string, any>;
+    getMaterialDefinition(material: any): String3DCustomMaterialDefinition | null;
+    isShaderMaterial(material: any): boolean;
+    applyUniforms(material: any, definition: String3DCustomMaterialDefinition, values: Record<string, any>): void;
     private buildUniforms;
     private convertUniformValue;
     private loadTexture;
@@ -766,4 +923,4 @@ declare class ThreeJSMaterialFactory implements IMaterialFactory {
     dispose(): void;
 }
 
-export { type CameraMode, FontConverter, type FontData, type FontSource, type I3DBox3, type I3DCamera, type I3DEngine, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DParticleSystem, type I3DPerspectiveCamera, type I3DQuaternion, type I3DRenderTarget, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, type IMaterialFactory, type IMaterialInstance, type MaterialBlendMode, type MaterialSide, type ParticleMode, type ParticleSystemConfig, type ShaderInjection, type ShaderInjectionPoint, String3D, String3DCamera, type String3DCustomFilterDefinition, String3DCustomFilterRegistry, type String3DCustomMaterialDefinition, String3DCustomMaterialRegistry, type String3DFontEntry, String3DFontRegistry, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSMaterialFactory, ThreeJSProvider, type UniformDefinition, type UniformType };
+export { type CameraMode, FontConverter, type FontData, type FontSource, type I3DBackend, type I3DBox3, type I3DCamera, type I3DCustomFilterRegistryRuntime, type I3DCustomMaterialRegistryRuntime, type I3DEngine, type I3DEngineCapabilities, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DParticleSystem, type I3DPerspectiveCamera, type I3DPostProcessPipelineRuntime, type I3DPostProcessRuntime, type I3DQuaternion, type I3DRenderTarget, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, type IMaterialFactory, type IMaterialInstance, type MaterialBlendMode, type MaterialSide, type ParticleMode, type ParticleSystemConfig, type ShaderInjection, type ShaderInjectionPoint, String3D, String3DCamera, type String3DCustomFilterDefinition, String3DCustomFilterRegistry, type String3DCustomMaterialDefinition, String3DCustomMaterialRegistry, type String3DFontEntry, String3DFontRegistry, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSMaterialFactory, ThreeJSProvider, type UniformDefinition, type UniformType };

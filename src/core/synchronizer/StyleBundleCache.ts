@@ -5,7 +5,8 @@ export class StyleBundleCache<T> {
   private meta: WeakMap<HTMLElement, { time: number }> = new WeakMap();
 
   get(el: HTMLElement, ctx: SyncContext, reader: (el: HTMLElement) => T): T {
-    const canUseCache = !!ctx.dirtySet && ctx.forceSync === false && !ctx.dirtySet.has(el);
+    const isDirty = !!ctx.dirtySet && ctx.dirtySet.has(el);
+    const canUseCache = !!ctx.dirtySet && ctx.forceSync === false && !isDirty;
     if (canUseCache) {
       const cached = this.cache.get(el);
       if (cached) return cached;
@@ -13,7 +14,7 @@ export class StyleBundleCache<T> {
 
     const now = performance.now();
     const interval = Math.max(0, ctx.styleReadIntervalMs ?? 0);
-    if (interval > 0) {
+    if (interval > 0 && !isDirty) {
       const metaData = this.meta.get(el);
       const cached = this.cache.get(el);
       if (metaData && cached && now - metaData.time < interval) {
@@ -30,5 +31,10 @@ export class StyleBundleCache<T> {
   clear(): void {
     this.cache = new WeakMap();
     this.meta = new WeakMap();
+  }
+
+  invalidate(el: HTMLElement): void {
+    this.cache.delete(el);
+    this.meta.delete(el);
   }
 }

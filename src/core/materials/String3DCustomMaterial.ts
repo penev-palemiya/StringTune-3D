@@ -44,7 +44,7 @@ export type MaterialSide = "front" | "back" | "double";
 export type String3DCustomMaterialDefinition = {
   name: string;
 
-  extends?: "basic" | "standard" | "physical" | "shader";
+  extends?: "basic" | "standard" | "physical" | "transmission" | "shader";
 
   vertexShader?: string;
   fragmentShader?: string;
@@ -55,11 +55,26 @@ export type String3DCustomMaterialDefinition = {
 
   properties?: {
     transparent?: boolean;
+    opacity?: number;
     side?: MaterialSide;
     depthWrite?: boolean;
     depthTest?: boolean;
     blending?: MaterialBlendMode;
     wireframe?: boolean;
+    color?: string | number;
+    emissive?: string | number;
+    metalness?: number;
+    roughness?: number;
+    transmission?: number;
+    thickness?: number;
+    ior?: number;
+    reflectivity?: number;
+    clearcoat?: number;
+    clearcoatRoughness?: number;
+    attenuationDistance?: number;
+    attenuationColor?: string | number;
+    transmissionSamples?: number;
+    transmissionSampler?: boolean;
   };
 
   lights?: boolean;
@@ -100,7 +115,7 @@ export class String3DCustomMaterialRegistry {
           initialValue: this.defaultCssInitialValue(def),
         });
         this.registeredCssVars.add(cssVar);
-      } catch (err) {}
+      } catch (err) { }
     }
   }
 

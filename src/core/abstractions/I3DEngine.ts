@@ -137,7 +137,7 @@ export interface I3DParticleSystem extends I3DObject {
   setConfig?(config: ParticleSystemConfig): void;
   setMaterial?(
     material: I3DMaterial | null,
-    options?: { points?: boolean; meshes?: boolean }
+    options?: { points?: boolean; meshes?: boolean },
   ): void;
   dispose?(): void;
 }
@@ -196,6 +196,19 @@ export interface I3DTextureLoader {
   load(url: string, onLoad?: (texture: any) => void): any;
 }
 
+export type I3DMaterialVisualProps = {
+  opacity?: number;
+  color?: string;
+  metalness?: number;
+  roughness?: number;
+  emissive?: string;
+};
+
+export type I3DModelLoaderOptions = {
+  textureBaseUrl?: string;
+  textureMap?: Record<string, string>;
+};
+
 export type TextGeometryOptions = {
   size: number;
   height: number;
@@ -218,9 +231,70 @@ export interface I3DModelLoader {
     url: string,
     onLoad?: (model: any) => void,
     onProgress?: (progress: any) => void,
-    onError?: (error: any) => void
+    onError?: (error: any) => void,
   ): void;
 }
+
+export type I3DBackend = "webgl" | "webgpu" | "custom";
+
+export type I3DEngineCapabilities = {
+  renderTargets: boolean;
+  shaderMaterials: boolean;
+  postProcess: boolean;
+  customMaterialFactory: boolean;
+  particles: boolean;
+  text: boolean;
+  geometrySimplify: boolean;
+};
+
+export interface I3DPostProcessRuntime {
+  isSupported(renderer: I3DRenderer): boolean;
+  createRenderTarget(width: number, height: number, options?: any): I3DRenderTarget;
+  createShaderMaterial(params?: any): I3DMaterial;
+  setRenderTarget(renderer: I3DRenderer, target: I3DRenderTarget | null): void;
+  clear(renderer: I3DRenderer, color?: boolean, depth?: boolean, stencil?: boolean): void;
+  createPipeline?(context: {
+    engine: I3DEngine;
+    renderer: I3DRenderer;
+    width: number;
+    height: number;
+    customFilterRegistry: I3DCustomFilterRegistryRuntime;
+  }): I3DPostProcessPipelineRuntime | null;
+}
+
+export interface I3DPostProcessPipelineRuntime {
+  isSupported(): boolean;
+  resize(width: number, height: number): void;
+  setScale(scale: number): void;
+  applyFilters(
+    input: I3DRenderTarget,
+    effects: import("../filters/String3DFilterTypes").String3DFilterChain,
+    quality?: number,
+  ): I3DRenderTarget;
+  acquireTarget(): I3DRenderTarget;
+  releaseTarget(target: I3DRenderTarget): void;
+  renderToScreen(input: I3DRenderTarget): void;
+  dispose(): void;
+}
+
+export interface I3DCustomFilterRegistryRuntime {
+  get(
+    name: string,
+  ): import("../filters/String3DCustomFilter").String3DCustomFilterDefinition | undefined;
+}
+
+export interface I3DCustomMaterialRegistryRuntime {
+  get(name: string): import("../materials").String3DCustomMaterialDefinition | undefined;
+}
+
+export type I3DLayerIsolationState = unknown;
+
+export type I3DRendererConfigContext = {
+  width: number;
+  height: number;
+  pixelRatio: number;
+  container: HTMLElement;
+};
 
 export interface I3DEngine {
   createVector3(x?: number, y?: number, z?: number): I3DVector3;
@@ -235,11 +309,13 @@ export interface I3DEngine {
     alpha?: boolean;
     logarithmicDepthBuffer?: boolean;
   }): I3DRenderer;
+  getRecommendedPixelRatio?(): number;
+  configureRenderer?(renderer: I3DRenderer, context: I3DRendererConfigContext): void;
   createPerspectiveCamera(
     fov?: number,
     aspect?: number,
     near?: number,
-    far?: number
+    far?: number,
   ): I3DPerspectiveCamera;
   createOrthographicCamera(
     left: number,
@@ -247,7 +323,7 @@ export interface I3DEngine {
     top: number,
     bottom: number,
     near?: number,
-    far?: number
+    far?: number,
   ): I3DOrthographicCamera;
   createGroup(): I3DObject;
   createMesh(geometry: I3DGeometry, material: I3DMaterial): I3DMesh;
@@ -255,14 +331,14 @@ export interface I3DEngine {
   createSphereGeometry(
     radius: number,
     widthSegments?: number,
-    heightSegments?: number
+    heightSegments?: number,
   ): I3DGeometry;
   createPlaneGeometry(width: number, height: number): I3DGeometry;
   createCylinderGeometry(
     radiusTop: number,
     radiusBottom: number,
     height: number,
-    segments?: number
+    segments?: number,
   ): I3DGeometry;
   createMeshBasicMaterial(params?: any): I3DMaterial;
   createMeshStandardMaterial(params?: any): I3DMaterial;
@@ -271,7 +347,7 @@ export interface I3DEngine {
     color?: string | number,
     intensity?: number,
     distance?: number,
-    decay?: number
+    decay?: number,
   ): I3DLight;
   createSpotLight(
     color?: string | number,
@@ -279,24 +355,53 @@ export interface I3DEngine {
     distance?: number,
     angle?: number,
     penumbra?: number,
-    decay?: number
+    decay?: number,
   ): I3DLight;
   createHemisphereLight(
     skyColor?: string | number,
     groundColor?: string | number,
-    intensity?: number
+    intensity?: number,
   ): I3DLight;
   createAmbientLight(color?: string | number, intensity?: number): I3DLight;
   createDirectionalLight(color?: string | number, intensity?: number): I3DLight;
   createTextureLoader(): I3DTextureLoader;
   createModelLoader(type: string): I3DModelLoader;
+  configureModelLoader?(loader: I3DModelLoader, options: I3DModelLoaderOptions): void;
+  resolveLoadedModelRoot?(loadedModel: any): I3DObject | null;
   createRenderTarget?(width: number, height: number, options?: any): I3DRenderTarget;
   getMaterialFactory?(): import("../materials").IMaterialFactory | null;
   createParticleSystem?(config: ParticleSystemConfig): I3DParticleSystem;
+  setObjectPosition?(target: any, x: number, y: number, z: number): boolean;
+  applyMaterialProps?(material: I3DMaterial, props: I3DMaterialVisualProps): boolean;
+  supportsObjectLayerIsolation?(camera: I3DCamera, objects: I3DObject[]): boolean;
+  beginObjectLayerIsolation?(
+    camera: I3DCamera,
+    objects: I3DObject[],
+    lights: I3DObject[],
+    layer: number,
+  ): I3DLayerIsolationState | null;
+  endObjectLayerIsolation?(camera: I3DCamera, state: I3DLayerIsolationState): void;
+  forEachMesh(object: I3DObject, callback: (mesh: I3DMesh) => void): void;
+  forEachMaterial(object: I3DObject, callback: (material: I3DMaterial) => void): void;
+  getPrimaryMesh(object: I3DObject): I3DMesh | null;
+  applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean;
   loadFont?(url: string): Promise<any>;
   createTextGeometry?(text: string, font: any, options: TextGeometryOptions): I3DGeometry | null;
+  getTextGeometryLayoutSignature?(context: {
+    text: string;
+    layoutSignature: string;
+    layout: Array<{ char: string; x: number; y: number; scale?: number }>;
+    elementWidth: number;
+    elementHeight: number;
+    fontSize: number;
+  }): string;
   simplifyGeometry?(geometry: I3DGeometry, quality: number): I3DGeometry | null;
   degToRad(degrees: number): number;
   radToDeg(radians: number): number;
   computeBoundingBoxRecursively(object: I3DObject): I3DBox3;
+  getBackend?(): I3DBackend;
+  getCapabilities?(): I3DEngineCapabilities;
+  getPostProcessRuntime?(): I3DPostProcessRuntime | null;
+  getCustomFilterRegistry?(): I3DCustomFilterRegistryRuntime | null;
+  getCustomMaterialRegistry?(): I3DCustomMaterialRegistryRuntime | null;
 }

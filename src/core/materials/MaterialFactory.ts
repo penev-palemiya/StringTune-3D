@@ -18,19 +18,29 @@ export interface IMaterialFactory {
 
   create(
     definition: String3DCustomMaterialDefinition,
-    initialUniforms?: Record<string, any>
+    initialUniforms?: Record<string, any>,
   ): IMaterialInstance;
 
   parseUniformsFromCSS(
     definition: String3DCustomMaterialDefinition,
     element: HTMLElement,
-    style: CSSStyleDeclaration
+    style: CSSStyleDeclaration,
   ): Record<string, any>;
+
+  getMaterialDefinition?(material: any): String3DCustomMaterialDefinition | null;
+
+  applyUniforms?(
+    material: any,
+    definition: String3DCustomMaterialDefinition,
+    values: Record<string, any>,
+  ): void;
+
+  isShaderMaterial?(material: any): boolean;
 }
 
 export function parseUniformValue(
   def: UniformDefinition,
-  cssValue: string | null | undefined
+  cssValue: string | null | undefined,
 ): any {
   if (cssValue === null || cssValue === undefined || cssValue === "" || cssValue === "none") {
     return def.value;
@@ -105,7 +115,7 @@ function parseColorValue(value: string): [number, number, number] | null {
 export function collectUniformsFromCSS(
   definition: String3DCustomMaterialDefinition,
   element: HTMLElement,
-  style: CSSStyleDeclaration
+  style: CSSStyleDeclaration,
 ): Record<string, any> {
   const result: Record<string, any> = {};
 

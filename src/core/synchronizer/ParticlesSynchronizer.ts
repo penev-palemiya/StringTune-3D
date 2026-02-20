@@ -3,7 +3,7 @@ import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 import type { SyncContext } from "./SyncContext";
 import { StyleReader } from "../../modules/string3d/styleUtils";
 import { StyleBundleCache } from "./StyleBundleCache";
-import type { ParticleSystemConfig } from "../abstractions/I3DEngine";
+import type { ParticleSystemConfig, I3DParticleSystem } from "../abstractions/I3DEngine";
 import { String3DCustomMaterialRegistry } from "../materials";
 import type { IMaterialInstance } from "../materials";
 
@@ -78,7 +78,7 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         screenCenterX - ctx.viewportWidth / 2,
         -(screenCenterY - ctx.viewportHeight / 2),
-        bundle.translateZ
+        bundle.translateZ,
       );
     } else {
       const frustum = ctx.camera.getFrustumSizeAt(bundle.translateZ);
@@ -87,7 +87,7 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         (normalizedX - 0.5) * frustum.width,
         -(normalizedY - 0.5) * frustum.height,
-        bundle.translateZ
+        bundle.translateZ,
       );
     }
 
@@ -102,9 +102,10 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
 
     const config = this.buildConfig(bundle, rect, ctx, parentData);
     const prev = ParticlesSynchronizer.lastConfig.get(object);
+    const particleSystem = object.object as I3DParticleSystem;
     if (!prev || !this.isSameConfig(prev, config)) {
       ParticlesSynchronizer.lastConfig.set(object, config);
-      (object.object as any).setConfig?.(config);
+      particleSystem.setConfig?.(config);
     }
 
     this.updateMaterialOverrides(el, object, ctx, bundle);
@@ -114,7 +115,7 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
     const last = ParticlesSynchronizer.lastTime.get(object) ?? now;
     const dt = Math.max(0, (now - last) / 1000);
     ParticlesSynchronizer.lastTime.set(object, now);
-    (object.object as any).update?.(dt);
+    particleSystem.update?.(dt);
 
     return { scale: parentData?.scale ?? 1 };
   }
@@ -146,72 +147,72 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
         particleSpeed: styles.readNumber("--particle-speed", DEFAULT_CONFIG.particleSpeed),
         particleDirection: this.parseVec3(
           styles.readString("--particle-direction", "0 1 0"),
-          DEFAULT_CONFIG.particleDirection
+          DEFAULT_CONFIG.particleDirection,
         ),
         particleGravity: this.parseVec3(
           styles.readString("--particle-gravity", "0 -30 0"),
-          DEFAULT_CONFIG.particleGravity
+          DEFAULT_CONFIG.particleGravity,
         ),
         particleDrag: styles.readNumber("--particle-drag", DEFAULT_CONFIG.particleDrag),
         particleSizeVariation: styles.readNumber(
           "--particle-size-variation",
-          DEFAULT_CONFIG.particleSizeVariation
+          DEFAULT_CONFIG.particleSizeVariation,
         ),
         particleColorVariation: styles.readNumber(
           "--particle-color-variation",
-          DEFAULT_CONFIG.particleColorVariation
+          DEFAULT_CONFIG.particleColorVariation,
         ),
         particleShape: this.parseShape(
-          styles.readString("--particles-shape", DEFAULT_CONFIG.particleShape)
+          styles.readString("--particles-shape", DEFAULT_CONFIG.particleShape),
         ),
         particleModelUrl: styles.readString("--particles-model", DEFAULT_CONFIG.particleModelUrl),
         particleModelLoader: styles.readString(
           "--particles-model-loader",
-          DEFAULT_CONFIG.particleModelLoader
+          DEFAULT_CONFIG.particleModelLoader,
         ),
         particleModelNode: styles.readString(
           "--particles-model-node",
-          DEFAULT_CONFIG.particleModelNode
+          DEFAULT_CONFIG.particleModelNode,
         ),
         instanceShape: this.parseDistribution(
-          styles.readString("--instance-shape", DEFAULT_CONFIG.instanceShape)
+          styles.readString("--instance-shape", DEFAULT_CONFIG.instanceShape),
         ),
         instanceModelUrl: styles.readString("--instance-model", DEFAULT_CONFIG.instanceModelUrl),
         instanceModelLoader: styles.readString(
           "--instance-model-loader",
-          DEFAULT_CONFIG.instanceModelLoader
+          DEFAULT_CONFIG.instanceModelLoader,
         ),
         instanceModelNode: styles.readString(
           "--instance-model-node",
-          DEFAULT_CONFIG.instanceModelNode
+          DEFAULT_CONFIG.instanceModelNode,
         ),
         instanceScale: styles.readNumber("--instance-scale", DEFAULT_CONFIG.instanceScale),
         instanceScaleVariation: styles.readNumber(
           "--instance-scale-variation",
-          DEFAULT_CONFIG.instanceScaleVariation
+          DEFAULT_CONFIG.instanceScaleVariation,
         ),
         instanceRotationSpeed: styles.readNumber(
           "--instance-rotation-speed",
-          DEFAULT_CONFIG.instanceRotationSpeed
+          DEFAULT_CONFIG.instanceRotationSpeed,
         ),
         instanceJitter: styles.readNumber("--instance-jitter", DEFAULT_CONFIG.instanceJitter),
         instanceFlow: styles.readNumber("--instance-flow", DEFAULT_CONFIG.instanceFlow),
         instanceDisperse: styles.readNumber("--instance-disperse", DEFAULT_CONFIG.instanceDisperse),
         instanceDisperseScatter: styles.readNumber(
           "--instance-scatter",
-          DEFAULT_CONFIG.instanceDisperseScatter
+          DEFAULT_CONFIG.instanceDisperseScatter,
         ),
         instanceDisperseScatterX: styles.readNumber(
           "--instance-scatter-x",
-          DEFAULT_CONFIG.instanceDisperseScatterX
+          DEFAULT_CONFIG.instanceDisperseScatterX,
         ),
         instanceDisperseScatterY: styles.readNumber(
           "--instance-scatter-y",
-          DEFAULT_CONFIG.instanceDisperseScatterY
+          DEFAULT_CONFIG.instanceDisperseScatterY,
         ),
         instanceDisperseScatterZ: styles.readNumber(
           "--instance-scatter-z",
-          DEFAULT_CONFIG.instanceDisperseScatterZ
+          DEFAULT_CONFIG.instanceDisperseScatterZ,
         ),
         modelTransitionDuration: this.getTransitionDuration(el, "--instance-model"),
       };
@@ -334,7 +335,7 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
     bundle: ParticleStyleBundle,
     rect: DOMRect,
     ctx: SyncContext,
-    parentData: any
+    parentData: any,
   ): ParticleSystemConfig {
     const parentScale = parentData?.scale ?? 1;
     const scale = parentScale;
@@ -397,11 +398,14 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
     el: HTMLElement,
     object: String3DObject,
     ctx: SyncContext,
-    bundle: ParticleStyleBundle
+    bundle: ParticleStyleBundle,
   ): void {
+    const particleSystem = object.object as I3DParticleSystem;
     const typeRaw = bundle.materialType || "basic";
     const type = typeRaw.split("[")[0].trim().toLowerCase();
-    const definition = String3DCustomMaterialRegistry.get(type);
+    const customMaterialRegistry =
+      ctx.engine.getCustomMaterialRegistry?.() || String3DCustomMaterialRegistry;
+    const definition = customMaterialRegistry.get(type);
     const factory = ctx.engine.getMaterialFactory?.();
 
     if (!definition || !factory || !factory.supports(definition)) {
@@ -416,7 +420,7 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
         ParticlesSynchronizer.materialInstances.delete(object);
       }
       ParticlesSynchronizer.lastMaterialType.delete(object);
-      (object.object as any).setMaterial?.(null, { points: true, meshes: true });
+      particleSystem.setMaterial?.(null, { points: true, meshes: true });
       return;
     }
 
@@ -432,10 +436,9 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
       ParticlesSynchronizer.lastMaterialType.set(object, type);
 
       const material = instance.material;
-      const isShader = !!material?.isShaderMaterial;
-      const system: any = object.object as any;
-      system.setMaterial?.(material, { meshes: true, points: false });
-      system.setMaterial?.(isShader ? material : null, { meshes: false, points: true });
+      const isShader = factory.isShaderMaterial?.(material) ?? !!material?.isShaderMaterial;
+      particleSystem.setMaterial?.(material, { meshes: true, points: false });
+      particleSystem.setMaterial?.(isShader ? material : null, { meshes: false, points: true });
     }
   }
 
@@ -446,10 +449,15 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
     const style = getComputedStyle(el);
 
     const apply = (mat: any) => {
-      const definition = mat?.userData?.definition;
+      const definition = factory.getMaterialDefinition?.(mat) ?? mat?.userData?.definition;
       if (!definition?.uniforms) return;
 
       const values = factory.parseUniformsFromCSS(definition, el, style);
+
+      if (typeof factory.applyUniforms === "function") {
+        factory.applyUniforms(mat, definition, values);
+        return;
+      }
 
       for (const [key, value] of Object.entries(values)) {
         const def = definition.uniforms?.[key];
@@ -458,23 +466,11 @@ export class ParticlesSynchronizer implements String3DObjectSyncStrategy {
         const converter = (factory as any).convertUniformValue?.bind(factory);
         const converted = converter ? converter(def.type, value) : value;
 
-        if (mat.userData?.shader?.uniforms?.[key]) {
-          mat.userData.shader.uniforms[key].value = converted;
-        } else if (mat.userData?.customUniforms?.[key]) {
-          mat.userData.customUniforms[key].value = converted;
-        } else if (mat.uniforms?.[key]) {
+        if (mat.uniforms?.[key]) {
           mat.uniforms[key].value = converted;
         }
       }
     };
-
-    if (object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child.isMesh || child.isPoints) {
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach(apply);
-        }
-      });
-    }
+    ctx.engine.forEachMaterial(object.object, apply);
   }
 }

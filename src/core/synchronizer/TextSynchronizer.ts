@@ -7,8 +7,6 @@ import { MeshSynchronizer } from "./MeshSynchronizer";
 
 const DEG_TO_RAD = Math.PI / 180;
 
-const DEBUG_TEXT_SYNC = false;
-
 const PSEUDO_ELEMENT_CSS = `
 [data-string3d-text] {
   -webkit-text-fill-color: transparent;
@@ -123,7 +121,10 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     el.style.setProperty("--string3d-transform", transform || "none");
   }
 
-  private static setupContentObserver(el: HTMLElement, object: String3DObject): void {
+  private static setupContentObserver(
+    el: HTMLElement,
+    resolveObject: () => String3DObject | undefined,
+  ): void {
     if (this.contentObservers.has(el)) return;
 
     let lastContent = el.textContent || "";
@@ -136,8 +137,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
       lastContent = currentContent;
 
-      const string3d = (window as any).StringTune3D?.String3D?.getInstance?.();
-      const currentObject = string3d?.scene?.getObjectForElement?.(el);
+      const currentObject = resolveObject();
 
       if (currentObject) {
         this.geometryKeys.delete(currentObject);
@@ -169,7 +169,10 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
   sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any {
     TextSynchronizer.injectPseudoElementStyles();
     TextSynchronizer.setupSelectableText(el);
-    TextSynchronizer.setupContentObserver(el, object);
+    TextSynchronizer.setupContentObserver(
+      el,
+      () => ctx.scene?.getObjectForElement(el) || object,
+    );
 
     const { rect, width: originalWidth, height: originalHeight } = this.readLayout(el, ctx);
     const bundle = this.readStyleBundle(el, ctx);
@@ -209,7 +212,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         screenCenterX - ctx.viewportWidth / 2,
         -(screenCenterY - ctx.viewportHeight / 2),
-        translateZ
+        translateZ,
       );
     } else {
       const frustum = ctx.camera.getFrustumSizeAt(translateZ);
@@ -218,7 +221,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       object.object.position.set(
         (normalizedX - 0.5) * frustum.width,
         -(normalizedY - 0.5) * frustum.height,
-        translateZ
+        translateZ,
       );
     }
 
@@ -227,14 +230,11 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     object.object.rotation.z = -rotateZ * DEG_TO_RAD;
     object.object.rotation.order = "XYZ";
 
-    object.object.rotation.z = -rotateZ * DEG_TO_RAD;
-    object.object.rotation.order = "XYZ";
-
     const layout = this.extractCharacterLayout(el, textTransform);
-    const textContent = layout.map((l) => l.char).join("");
-    const useCanvasText = Boolean(fontCss);
+    const rawText = this.extractRawText(el, textTransform);
+    const textContent = rawText || layout.map((l) => l.char).join("");
 
-    const mesh = this.getTextMesh(object);
+    const mesh = this.getTextMesh(object, ctx);
     if (!mesh) {
       return { scale: cssScale * (parentData?.scale || 1) };
     }
@@ -293,6 +293,15 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
             layout.length - 1
           ].x.toFixed(1)},${layout[layout.length - 1].y.toFixed(1)}`
         : "empty";
+    const effectiveLayoutSig =
+      ctx.engine.getTextGeometryLayoutSignature?.({
+        text: textContent,
+        layoutSignature: layoutSig,
+        layout,
+        elementWidth: rect.width,
+        elementHeight: rect.height,
+        fontSize,
+      }) || layoutSig;
 
     const key = [
       textContent,
@@ -300,7 +309,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
       fontCss || "",
       rect.width.toFixed(1),
       rect.height.toFixed(1),
-      layoutSig,
+      effectiveLayoutSig,
       textDepth.toFixed(3),
       textCurveSegments.toFixed(3),
       bevelEnabled ? "1" : "0",
@@ -331,10 +340,13 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
       if (geometry) {
         geometry.computeBoundingBox();
-        if (mesh.geometry) {
-          mesh.geometry.dispose?.();
+        const appliedToMesh = ctx.engine.applyTextGeometryToMesh(mesh, geometry);
+        if (!appliedToMesh) {
+          if (mesh.geometry) {
+            mesh.geometry.dispose?.();
+          }
+          mesh.geometry = geometry;
         }
-        mesh.geometry = geometry;
         object.geometry = geometry;
         TextSynchronizer.geometryKeys.set(object, key);
       }
@@ -358,23 +370,22 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
     const prevMaterialType = TextSynchronizer.lastMaterialType.get(object);
     if (prevMaterialType !== undefined && prevMaterialType !== materialType) {
-      if (ctx.scene && (ctx.scene as any).recreateMaterialForObject) {
+      const scene = ctx.scene;
+      if (scene) {
         requestAnimationFrame(() => {
-          if (ctx.scene && (ctx.scene as any).recreateMaterialForObject) {
-            (ctx.scene as any).recreateMaterialForObject(object, el);
-          }
+          scene.recreateMaterialForObject(object, el);
         });
       }
     }
 
     TextSynchronizer.lastMaterialType.set(object, materialType);
 
-    MeshSynchronizer.applyVisualProps(el, object, {
+    MeshSynchronizer.applyVisualProps(el, object, ctx.engine, {
       opacity,
       color: color && color !== "none" ? color : undefined,
       metalness: Number.isFinite(metalness) ? metalness : undefined,
       roughness: Number.isFinite(roughness) ? roughness : undefined,
-      emissive: emissive && emissive !== "none" ? emissive : undefined,
+      emissive: MeshSynchronizer.resolveEmissiveValue(el, emissive),
       castShadow,
       receiveShadow,
     });
@@ -391,7 +402,7 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
 
   private extractCharacterLayout(
     el: HTMLElement,
-    transform: string
+    transform: string,
   ): Array<{
     char: string;
     x: number;
@@ -449,18 +460,25 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     return layout;
   }
 
-  private getTextMesh(object: String3DObject): any | null {
-    const anyObj = object.object as any;
-    if (anyObj?.__textMesh) return anyObj.__textMesh;
-    if (anyObj?.isMesh) return anyObj;
-    if (Array.isArray(anyObj?.children)) {
-      const found = anyObj.children.find((child: any) => child?.isMesh);
-      if (found) {
-        anyObj.__textMesh = found;
-        return found;
-      }
-    }
-    return null;
+  private extractRawText(el: HTMLElement, transform: string): string {
+    const text = Array.from(el.childNodes)
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent || "")
+      .join("");
+
+    const normalized = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join("\n")
+      .trim();
+
+    if (!normalized) return "";
+    return this.applyTextTransform(normalized, transform);
+  }
+
+  private getTextMesh(object: String3DObject, ctx: SyncContext): any | null {
+    return ctx.engine.getPrimaryMesh(object.object);
   }
 
   private updateCustomUniforms(el: HTMLElement, object: String3DObject, ctx: SyncContext): void {
@@ -470,39 +488,27 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     const style = getComputedStyle(el);
 
     const apply = (mat: any) => {
-      const definition = mat?.userData?.definition;
+      const definition = factory.getMaterialDefinition?.(mat) ?? mat?.userData?.definition;
       if (!definition?.uniforms) return;
 
       const values = factory.parseUniformsFromCSS(definition, el, style);
+
+      if (typeof factory.applyUniforms === "function") {
+        factory.applyUniforms(mat, definition, values);
+        return;
+      }
+
       for (const [key, value] of Object.entries(values)) {
         const def = definition.uniforms?.[key];
         if (!def) continue;
         const converter = (factory as any).convertUniformValue?.bind(factory);
         const converted = converter ? converter(def.type, value) : value;
-
-        if (mat.userData?.shader?.uniforms?.[key]) {
-          mat.userData.shader.uniforms[key].value = converted;
-        } else if (mat.userData?.customUniforms?.[key]) {
-          mat.userData.customUniforms[key].value = converted;
-        } else if (mat.uniforms?.[key]) {
+        if (mat.uniforms?.[key]) {
           mat.uniforms[key].value = converted;
         }
       }
     };
-
-    if (object.object.traverse) {
-      object.object.traverse((child: any) => {
-        if (child.isMesh) {
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach(apply);
-        }
-      });
-    } else {
-      const mesh = this.getTextMesh(object);
-      if (!mesh) return;
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      materials.forEach(apply);
-    }
+    ctx.engine.forEachMaterial(object.object, apply);
   }
 
   private readStyleBundle(el: HTMLElement, ctx: SyncContext): StyleBundle {
@@ -525,14 +531,18 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         return Number.isNaN(num) ? fallback : num;
       };
 
-      const readString = (prop: string): string => {
+      const readString = (prop: string, fallback = ""): string => {
         const mapValue = styleMap?.get?.(prop);
         const val =
           mapValue && typeof mapValue === "object" && "value" in (mapValue as any)
             ? (mapValue as any).value
             : mapValue;
-        if (typeof val === "string") return val.trim();
-        return style.getPropertyValue(prop).trim();
+        if (typeof val === "string") {
+          const normalized = val.trim();
+          return normalized || fallback;
+        }
+        const normalized = style.getPropertyValue(prop).trim();
+        return normalized || fallback;
       };
 
       const readBool = (prop: string, fallback = false): boolean => {
@@ -542,8 +552,8 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         return norm === "true" || norm === "1" || norm === "yes"
           ? true
           : norm === "false" || norm === "0" || norm === "no"
-          ? false
-          : fallback;
+            ? false
+            : fallback;
       };
 
       const colorVar = readString("--material-color");
@@ -585,8 +595,8 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         alignRaw === "center"
           ? "center"
           : alignRaw === "right" || alignRaw === "end"
-          ? "right"
-          : "left";
+            ? "right"
+            : "left";
 
       const fontCss = style.font?.trim();
       const computedFont =

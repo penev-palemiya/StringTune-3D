@@ -25,6 +25,12 @@ export type {
   I3DRenderer,
   I3DTextureLoader,
   I3DModelLoader,
+  I3DEngineCapabilities,
+  I3DBackend,
+  I3DPostProcessRuntime,
+  I3DPostProcessPipelineRuntime,
+  I3DCustomFilterRegistryRuntime,
+  I3DCustomMaterialRegistryRuntime,
 } from "./core/abstractions/I3DEngine";
 
 export type { CameraMode } from "./core/String3DCamera";

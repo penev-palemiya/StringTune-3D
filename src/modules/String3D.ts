@@ -1,7 +1,5 @@
-import { StringModule } from "@fiddle-digital/string-tune";
-import { StringObject } from "@fiddle-digital/string-tune";
-import { StringData } from "@fiddle-digital/string-tune";
-import { StringContext } from "@fiddle-digital/string-tune";
+import { StringContext, StringModule, StringObject, StringData } from "@fiddle-digital/string-tune";
+
 import { String3DCamera } from "../core/String3DCamera";
 import { String3DRenderer } from "../core/String3DRenderer";
 import { String3DScene } from "../core/String3DScene";
@@ -43,6 +41,8 @@ export class String3D extends StringModule {
   private lastSyncData: WeakMap<String3DObject, { scale: number }> = new WeakMap();
   private filterController: FilterController;
   private needsInitialResize = true;
+  private providerBootstrapped = false;
+  private pendingConnectedObjects: Map<string, StringObject> = new Map();
 
   public static getInstance(): String3D | null {
     return String3D._instance;
@@ -79,7 +79,7 @@ export class String3D extends StringModule {
       "string-3d-model-scale",
     ]);
     this.filterController = new FilterController((value) =>
-      this.tools.easingFunction.process({ easing: value })
+      this.tools.easingFunction.process({ easing: value }),
     );
 
     this.attributesToMap = [
@@ -98,21 +98,21 @@ export class String3D extends StringModule {
     String3D._instance = this;
   }
 
-  override canConnect(object: StringObject): boolean {
+  canConnect(object: StringObject): boolean {
     return super.canConnect(object);
   }
 
-  override initializeObject(
+  initializeObject(
     globalId: number,
     object: StringObject,
     element: HTMLElement,
-    attributes: Record<string, any>
+    attributes: Record<string, any>,
   ): void {
     super.initializeObject(globalId, object, element, attributes);
 
     object.setProperty("parentId", null);
     const parentElement = element.parentElement?.closest(
-      '[string-3d="group"]'
+      '[string-3d="group"]',
     ) as HTMLElement | null;
     if (parentElement) {
       const parentId = parentElement.getAttribute("string-id");
@@ -123,7 +123,7 @@ export class String3D extends StringModule {
     }
   }
 
-  override onResize(): void {
+  onResize(): void {
     if (this.renderer && this.camera && this.synchronizer) {
       this.renderer.resize(this.camera);
       this.synchronizer.updateViewportSize(this.renderer.width, this.renderer.height);
@@ -134,14 +134,11 @@ export class String3D extends StringModule {
     }
   }
 
-  override onInit(): void {
+  onInit(): void {
     this.options = this.buildOptionsFromSettings();
     if (!String3D.provider) {
       return;
     }
-
-    this.engine = String3D.provider.getEngine();
-    this.canvasContainer = this.createOrGetContainer();
     this.registerTypedProperties();
     this.injectCSS();
     this.useDirtySync = !!this.options.useDirtySync;
@@ -149,11 +146,35 @@ export class String3D extends StringModule {
       this.dirtySyncManager.enable();
     }
 
+    const provider = String3D.provider;
+    const initResult = provider.initialize?.();
+    if (initResult && typeof (initResult as Promise<void>).then === "function") {
+      (initResult as Promise<void>)
+        .then(() => {
+          this.bootstrapProvider(provider);
+        })
+        .catch(() => {});
+      return;
+    }
+
+    this.bootstrapProvider(provider);
+  }
+
+  private bootstrapProvider(provider: I3DEngineProvider): void {
+    if (this.providerBootstrapped) {
+      return;
+    }
+
+    this.engine = provider.getEngine();
+    this.filterController.setCustomFilterRegistry(this.engine.getCustomFilterRegistry?.());
+    this.canvasContainer = this.createOrGetContainer();
+
     this.renderer = new String3DRenderer(this.canvasContainer, this.engine);
     this.renderer.attach();
 
     this.camera = new String3DCamera(this.engine, "orthographic");
     this.camera.setPosition(0, 0, 1000);
+    this.camera.lookAt(0, 0, 0);
     this.camera.resize(this.renderer.width, this.renderer.height);
 
     const modelLoader = this.resolveModelLoader();
@@ -168,17 +189,26 @@ export class String3D extends StringModule {
       this.camera,
       this.renderer.width,
       this.renderer.height,
-      this.engine
+      this.engine,
     );
+    this.synchronizer.setScene(this._scene);
     this.synchronizer.setSyncOptions({
       styleReadIntervalMs: this.options.styleReadIntervalMs,
       layoutReadIntervalMs: this.options.layoutReadIntervalMs,
     });
 
     this._scene.setSynchronizer(this.synchronizer);
+    this.providerBootstrapped = true;
+    this.flushPendingConnections();
   }
 
-  override onSettingsChange(): void {
+  private flushPendingConnections(): void {
+    const pending = Array.from(this.pendingConnectedObjects.values());
+    this.pendingConnectedObjects.clear();
+    pending.forEach((object) => this.onObjectConnected(object));
+  }
+
+  onSettingsChange(): void {
     this.options = this.buildOptionsFromSettings();
     const shouldUseDirtySync = !!this.options.useDirtySync;
     if (shouldUseDirtySync && !this.useDirtySync) {
@@ -280,8 +310,14 @@ export class String3D extends StringModule {
     });
   }
 
-  override onObjectConnected(object: StringObject): void {
-    if (this.isLoading.has(object.id) || !this._scene) {
+  onObjectConnected(object: StringObject): void {
+    if (!this._scene) {
+      this.pendingConnectedObjects.set(object.id, object);
+      return;
+    }
+    this.pendingConnectedObjects.delete(object.id);
+
+    if (this.isLoading.has(object.id)) {
       return;
     }
     this.isLoading.set(object.id, true);
@@ -294,12 +330,13 @@ export class String3D extends StringModule {
     }
 
     if (this.options.hideHTML && object.htmlElement) {
-      object.htmlElement.style.opacity = "0";
-      object.htmlElement.style.pointerEvents = "none";
+      const nodeType = object.htmlElement.getAttribute("string-3d");
+      object.htmlElement.style.color = "transparent";
+      object.htmlElement.style.setProperty("-webkit-text-fill-color", "transparent");
     }
   }
 
-  override onFrame(data: StringData): void {
+  onFrame(data: StringData): void {
     if (!this.renderer || !this._scene || !this.camera || !this.synchronizer) return;
 
     if (this.needsInitialResize) {
@@ -321,7 +358,7 @@ export class String3D extends StringModule {
       this._scene.rootObjects,
       performance.now(),
       this.useDirtySync,
-      dirtySet
+      dirtySet,
     );
     this.renderer!.render(this._scene!, this.camera!, filterTargets);
 
@@ -333,7 +370,7 @@ export class String3D extends StringModule {
   private batchReadLayouts(
     rootObjects: String3DObject[],
     forceSync: boolean,
-    dirtySet: Set<HTMLElement> | null
+    dirtySet: Set<HTMLElement> | null,
   ): void {
     const walk = (obj: String3DObject): void => {
       if (obj.el) {
@@ -355,7 +392,7 @@ export class String3D extends StringModule {
     object: String3DObject,
     parentData: any,
     forceSync: boolean,
-    dirtySet: Set<HTMLElement> | null
+    dirtySet: Set<HTMLElement> | null,
   ): void {
     if (!this.synchronizer || !el) return;
     const shouldSync =
@@ -384,7 +421,7 @@ export class String3D extends StringModule {
 
     const forceChildren = forceSync || shouldSync;
     object.children.forEach((child) =>
-      this.syncRecursive(child.el, child, nextParentData, forceChildren, dirtySet)
+      this.syncRecursive(child.el, child, nextParentData, forceChildren, dirtySet),
     );
   }
 
@@ -613,8 +650,8 @@ export class String3D extends StringModule {
             name === "--text-fit"
               ? "*"
               : name.includes("color") || name.includes("emissive")
-              ? "<color>"
-              : "<number>",
+                ? "<color>"
+                : "<number>",
           inherits: false,
           initialValue,
         });
@@ -622,13 +659,15 @@ export class String3D extends StringModule {
     });
   }
 
-  override destroy(): void {
+  destroy(): void {
     this.renderer?.destroy();
     this._scene?.destroy();
     this.isLoading.clear();
     this.dirtySyncManager.disable();
     this.filterController.clear();
     this.lastSyncData = new WeakMap();
+    this.pendingConnectedObjects.clear();
+    this.providerBootstrapped = false;
 
     const styleEl = document.getElementById("string-3d-styles");
     styleEl?.remove();

@@ -6,18 +6,20 @@ import { LightSynchronizer } from "./LightSynchronizer";
 import { MeshSynchronizer } from "./MeshSynchronizer";
 import { ParticlesSynchronizer } from "./ParticlesSynchronizer";
 import { TextSynchronizer } from "./TextSynchronizer";
+import type { String3DScene } from "../String3DScene";
 import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 
 export class String3DSynchronizer {
   private strategies: Map<string, String3DObjectSyncStrategy> = new Map();
   private styleReadIntervalMs = 0;
   private layoutReadIntervalMs = 0;
+  private scene?: String3DScene;
 
   constructor(
     public camera: String3DCamera,
     public viewportWidth: number,
     public viewportHeight: number,
-    public engine: I3DEngine
+    public engine: I3DEngine,
   ) {
     this.strategies.set("box", new MeshSynchronizer());
     this.strategies.set("sphere", new MeshSynchronizer());
@@ -38,7 +40,7 @@ export class String3DSynchronizer {
     el: HTMLElement,
     object: String3DObject,
     parentData: any,
-    hints?: { dirtySet?: Set<HTMLElement> | null; forceSync?: boolean }
+    hints?: { dirtySet?: Set<HTMLElement> | null; forceSync?: boolean },
   ): any {
     const strategy = this.strategies.get(object.type);
     if (!strategy) {
@@ -53,12 +55,13 @@ export class String3DSynchronizer {
         viewportWidth: this.viewportWidth,
         viewportHeight: this.viewportHeight,
         engine: this.engine,
+        scene: this.scene,
         dirtySet: hints?.dirtySet,
         forceSync: hints?.forceSync,
         styleReadIntervalMs: this.styleReadIntervalMs,
         layoutReadIntervalMs: this.layoutReadIntervalMs,
       },
-      parentData
+      parentData,
     );
   }
 
@@ -68,6 +71,10 @@ export class String3DSynchronizer {
   }): void {
     this.styleReadIntervalMs = Math.max(0, options.styleReadIntervalMs ?? 0);
     this.layoutReadIntervalMs = Math.max(0, options.layoutReadIntervalMs ?? 0);
+  }
+
+  public setScene(scene: String3DScene): void {
+    this.scene = scene;
   }
 
   public updateViewportSize(width: number, height: number): void {
