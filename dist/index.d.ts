@@ -412,6 +412,32 @@ type TextGeometryOptions = {
     elementWidth?: number;
     elementHeight?: number;
 };
+type SVGGeometryOptions = {
+    depth: number;
+    curveSegments: number;
+    bevelEnabled: boolean;
+    bevelThickness: number;
+    bevelSize: number;
+    bevelOffset: number;
+    bevelSegments: number;
+};
+type SVGPathData = {
+    d: string;
+    transform: {
+        a: number;
+        b: number;
+        c: number;
+        d: number;
+        e: number;
+        f: number;
+    } | null;
+};
+type SVGViewBox = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
 interface I3DModelLoader {
     load(url: string, onLoad?: (model: any) => void, onProgress?: (progress: any) => void, onError?: (error: any) => void): void;
 }
@@ -511,6 +537,7 @@ interface I3DEngine {
     applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean;
     loadFont?(url: string): Promise<any>;
     createTextGeometry?(text: string, font: any, options: TextGeometryOptions): I3DGeometry | null;
+    createSVGGeometry?(paths: SVGPathData[], viewBox: SVGViewBox | null, options: SVGGeometryOptions): I3DGeometry | null;
     getTextGeometryLayoutSignature?(context: {
         text: string;
         layoutSignature: string;
@@ -627,6 +654,7 @@ declare class String3DScene {
     private createModel;
     private createParticles;
     private createText;
+    private createSVG;
     private getGeometryQuality;
     private resolveModelLoader;
     private centerObject;
@@ -709,6 +737,71 @@ declare class String3D extends StringModule {
     private injectCSS;
     private registerTypedProperties;
     destroy(): void;
+}
+
+interface SVGTransformMatrix {
+    a: number;
+    b: number;
+    c: number;
+    d: number;
+    e: number;
+    f: number;
+}
+interface ParsedSVGPath {
+    d: string;
+    transform: SVGTransformMatrix | null;
+}
+interface ParsedSVGData {
+    paths: ParsedSVGPath[];
+    viewBox: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    } | null;
+    naturalWidth: number;
+    naturalHeight: number;
+}
+declare class SVGParser {
+    static fromElement(svgEl: SVGSVGElement): ParsedSVGData;
+    static fromString(svgString: string): ParsedSVGData | null;
+}
+
+interface SyncContext {
+    camera: String3DCamera;
+    viewportWidth: number;
+    viewportHeight: number;
+    engine: I3DEngine;
+    scene?: String3DScene;
+    dirtySet?: Set<HTMLElement> | null;
+    forceSync?: boolean;
+    styleReadIntervalMs?: number;
+    layoutReadIntervalMs?: number;
+}
+
+interface String3DObjectSyncStrategy {
+    sync(el: HTMLElement, object: String3DObject, context: SyncContext, parentData: any): void;
+    cleanup?(el: HTMLElement, object: String3DObject): void;
+}
+
+declare class SVGSynchronizer implements String3DObjectSyncStrategy {
+    private static styleCache;
+    private static geometryKeys;
+    private static lastMaterialType;
+    private static svgCache;
+    private static svgFetchCache;
+    private static svgFetchPromises;
+    private static pendingSrcObjects;
+    private static mutationObservers;
+    private static morphStates;
+    private static svgSignatures;
+    sync(el: HTMLElement, object: String3DObject, ctx: SyncContext, parentData: any): any;
+    cleanup(el: HTMLElement, object: String3DObject): void;
+    private resolveSVGData;
+    private static markObjectPendingSrc;
+    private static invalidatePendingSrcObjects;
+    private static setupMutationObserver;
+    private readStyleBundle;
 }
 
 declare class String3DRenderer {
@@ -858,7 +951,17 @@ declare class ThreeJSEngine implements I3DEngine {
     private getInteriorPoint;
     private parseOutlineToShapes;
     private reversePath;
+    private getCurveEndPoint;
     createTextGeometry(text: string, font: any, options: any): I3DGeometry | null;
+    createSVGGeometry(paths: SVGPathData[], viewBox: SVGViewBox | null, options: SVGGeometryOptions): I3DGeometry | null;
+    private buildShapesWithHoles;
+    private svgPathContains;
+    private parseSVGPathToSubpaths;
+    private ensurePathWinding;
+    private clonePathAsShape;
+    private tokenizeSVGPath;
+    private nextNum;
+    private arcToBezier;
     private buildLineShapes;
     private getGlyphAdvance;
     private translateShape;
@@ -923,4 +1026,4 @@ declare class ThreeJSMaterialFactory implements IMaterialFactory {
     dispose(): void;
 }
 
-export { type CameraMode, FontConverter, type FontData, type FontSource, type I3DBackend, type I3DBox3, type I3DCamera, type I3DCustomFilterRegistryRuntime, type I3DCustomMaterialRegistryRuntime, type I3DEngine, type I3DEngineCapabilities, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DParticleSystem, type I3DPerspectiveCamera, type I3DPostProcessPipelineRuntime, type I3DPostProcessRuntime, type I3DQuaternion, type I3DRenderTarget, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, type IMaterialFactory, type IMaterialInstance, type MaterialBlendMode, type MaterialSide, type ParticleMode, type ParticleSystemConfig, type ShaderInjection, type ShaderInjectionPoint, String3D, String3DCamera, type String3DCustomFilterDefinition, String3DCustomFilterRegistry, type String3DCustomMaterialDefinition, String3DCustomMaterialRegistry, type String3DFontEntry, String3DFontRegistry, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSMaterialFactory, ThreeJSProvider, type UniformDefinition, type UniformType };
+export { type CameraMode, FontConverter, type FontData, type FontSource, type I3DBackend, type I3DBox3, type I3DCamera, type I3DCustomFilterRegistryRuntime, type I3DCustomMaterialRegistryRuntime, type I3DEngine, type I3DEngineCapabilities, type I3DEngineProvider, type I3DEuler, type I3DGeometry, type I3DLight, type I3DMaterial, type I3DMatrix4, type I3DMesh, type I3DModelLoader, type I3DObject, type I3DOrthographicCamera, type I3DParticleSystem, type I3DPerspectiveCamera, type I3DPostProcessPipelineRuntime, type I3DPostProcessRuntime, type I3DQuaternion, type I3DRenderTarget, type I3DRenderer, type I3DScene, type I3DTextureLoader, type I3DVector2, type I3DVector3, type IMaterialFactory, type IMaterialInstance, type MaterialBlendMode, type MaterialSide, type ParsedSVGData, type ParsedSVGPath, type ParticleMode, type ParticleSystemConfig, type SVGGeometryOptions, SVGParser, type SVGPathData, SVGSynchronizer, type SVGTransformMatrix, type SVGViewBox, type ShaderInjection, type ShaderInjectionPoint, String3D, String3DCamera, type String3DCustomFilterDefinition, String3DCustomFilterRegistry, type String3DCustomMaterialDefinition, String3DCustomMaterialRegistry, type String3DFontEntry, String3DFontRegistry, String3DObject, type String3DOptions, String3DRenderer, String3DScene, String3DSynchronizer, ThreeJSEngine, ThreeJSMaterialFactory, ThreeJSProvider, type UniformDefinition, type UniformType };

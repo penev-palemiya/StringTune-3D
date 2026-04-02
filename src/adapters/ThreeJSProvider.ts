@@ -93,7 +93,11 @@ export class ThreeJSEngine implements I3DEngine {
     logarithmicDepthBuffer?: boolean;
   }): I3DRenderer {
     const renderer = new this.THREE.WebGLRenderer(options);
-    renderer.outputEncoding = this.THREE.sRGBEncoding;
+    if ("outputColorSpace" in renderer && this.THREE.SRGBColorSpace) {
+      (renderer as any).outputColorSpace = this.THREE.SRGBColorSpace;
+    } else if ("outputEncoding" in renderer && this.THREE.sRGBEncoding) {
+      (renderer as any).outputEncoding = this.THREE.sRGBEncoding;
+    }
     return renderer;
   }
 
@@ -678,8 +682,7 @@ export class ThreeJSEngine implements I3DEngine {
     if (!path.curves || path.curves.length === 0) return newPath;
 
     const lastCurve = path.curves[path.curves.length - 1];
-    const endPoint =
-      lastCurve.v2 || lastCurve.v3 || (lastCurve.getPoint ? lastCurve.getPoint(1) : null);
+    const endPoint = this.getCurveEndPoint(lastCurve);
     if (endPoint) {
       newPath.moveTo(endPoint.x, endPoint.y);
     }
@@ -711,6 +714,11 @@ export class ThreeJSEngine implements I3DEngine {
     }
 
     return newPath;
+  }
+
+  private getCurveEndPoint(curve: any): any {
+    if (!curve) return null;
+    return curve.v3 || curve.v2 || curve.v1 || (curve.getPoint ? curve.getPoint(1) : null);
   }
 
   createTextGeometry(text: string, font: any, options: any): I3DGeometry | null {
@@ -792,6 +800,534 @@ export class ThreeJSEngine implements I3DEngine {
     });
     geometry.computeBoundingBox();
     return geometry;
+  }
+
+  createSVGGeometry(
+    paths: import("../core/abstractions/I3DEngine").SVGPathData[],
+    viewBox: import("../core/abstractions/I3DEngine").SVGViewBox | null,
+    options: import("../core/abstractions/I3DEngine").SVGGeometryOptions,
+  ): import("../core/abstractions/I3DEngine").I3DGeometry | null {
+    if (!paths || paths.length === 0) return null;
+
+    const depth = Math.max(0, options.depth || 0);
+    const curveSegments = Math.max(1, Math.round(options.curveSegments || 12));
+    const bevelEnabled = !!options.bevelEnabled;
+    const bevelThickness = Math.max(0, options.bevelThickness || 0);
+    const bevelSize = Math.max(0, options.bevelSize || 0);
+    const bevelOffset = options.bevelOffset || 0;
+    const bevelSegments = Math.max(0, options.bevelSegments || 0);
+
+    // Collect ALL raw subpaths from every path element
+    const allSubpaths: Array<{ path: any; points: any[]; area: number; signedArea: number; bbox: any }> = [];
+
+    for (const pathData of paths) {
+      const subpaths = this.parseSVGPathToSubpaths(pathData.d, pathData.transform);
+      allSubpaths.push(...subpaths);
+    }
+
+    if (allSubpaths.length === 0) return null;
+
+    // Center points by viewBox BEFORE building shapes
+    // (Y was already negated in applyTransform, so offset is -cx, +cy)
+    if (viewBox) {
+      const cx = viewBox.x + viewBox.width * 0.5;
+      const cy = viewBox.y + viewBox.height * 0.5;
+      for (const sp of allSubpaths) {
+        for (const pt of sp.points) {
+          pt.x -= cx;
+          pt.y += cy;
+        }
+        sp.bbox = this.getBoundingBox(sp.points.map((p: any) => ({ x: p.x, y: p.y })));
+      }
+    }
+
+    // Global hole detection across all subpaths
+    const allShapes = this.buildShapesWithHoles(allSubpaths);
+
+    if (allShapes.length === 0) return null;
+
+    const geometry = new this.THREE.ExtrudeGeometry(allShapes, {
+      depth,
+      curveSegments,
+      bevelEnabled,
+      bevelThickness,
+      bevelSize,
+      bevelOffset,
+      bevelSegments,
+    });
+    // Center geometry so rotation pivots around geometric center, not a face.
+    // ExtrudeGeometry places front face at z=0 and back face at z=depth,
+    // so without centering the object rotates around its front face.
+    geometry.center();
+    geometry.computeBoundingBox();
+    return geometry;
+  }
+
+  private buildShapesWithHoles(
+    subpaths: Array<{ path: any; points: any[]; area: number; signedArea: number; bbox: any }>,
+  ): any[] {
+    if (subpaths.length === 0) return [];
+
+    // Sort largest → smallest
+    subpaths.sort((a, b) => b.area - a.area);
+
+    const n = subpaths.length;
+
+    // For each path find its direct parent:
+    // the smallest-area path (highest index, since sorted descending) that contains it.
+    // Iterate j from i-1 down to 0 — first match is the direct parent.
+    const parent = new Array<number>(n).fill(-1);
+
+    for (let i = 1; i < n; i++) {
+      for (let j = i - 1; j >= 0; j--) {
+        if (this.svgPathContains(subpaths[j], subpaths[i])) {
+          parent[i] = j;
+          break;
+        }
+      }
+    }
+
+    // Compute nesting depth by walking up the parent chain
+    const depth = new Array<number>(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      let p = parent[i];
+      let d = 0;
+      while (p !== -1) {
+        d++;
+        p = parent[p];
+      }
+      depth[i] = d;
+    }
+
+    // Even depth → outer shape; odd depth → hole in its parent shape
+    const shapeByIndex = new Map<number, any>();
+    const finalShapes: any[] = [];
+
+    for (let i = 0; i < n; i++) {
+      if (depth[i] % 2 === 0) {
+        const srcPath = this.ensurePathWinding(subpaths[i].path, subpaths[i].points, true);
+        const shape = this.clonePathAsShape(srcPath);
+        shapeByIndex.set(i, shape);
+        finalShapes.push(shape);
+      }
+    }
+
+    for (let i = 0; i < n; i++) {
+      if (depth[i] % 2 === 1) {
+        // Walk up to find the nearest even-depth ancestor (the shape to punch the hole into)
+        let p = parent[i];
+        while (p !== -1 && depth[p] % 2 !== 0) {
+          p = parent[p];
+        }
+        const parentShape = p !== -1 ? shapeByIndex.get(p) : undefined;
+        if (parentShape) {
+          const holePath = this.ensurePathWinding(subpaths[i].path, subpaths[i].points, false);
+          parentShape.holes.push(holePath);
+        }
+      }
+    }
+
+    return finalShapes;
+  }
+
+  private svgPathContains(
+    outer: { points: any[]; bbox: any },
+    inner: { points: any[]; bbox: any },
+  ): boolean {
+    // Quick bbox rejection
+    if (
+      inner.bbox.minX < outer.bbox.minX ||
+      inner.bbox.maxX > outer.bbox.maxX ||
+      inner.bbox.minY < outer.bbox.minY ||
+      inner.bbox.maxY > outer.bbox.maxY
+    ) {
+      return false;
+    }
+
+    // Test a few distributed points of inner against outer polygon
+    const outerPoly = outer.points.map((p: any) => ({ x: p.x, y: p.y }));
+    const stride = Math.max(1, Math.floor(inner.points.length / 4));
+    for (let k = 0; k < inner.points.length; k += stride) {
+      const pt = inner.points[k];
+      if (pt && !this.pointInPolygon(pt.x, pt.y, outerPoly)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private parseSVGPathToSubpaths(
+    d: string,
+    transform: { a: number; b: number; c: number; d: number; e: number; f: number } | null,
+  ): Array<{ path: any; points: any[]; area: number; signedArea: number; bbox: any }> {
+    if (!d) return [];
+
+    const shapePath = new this.THREE.ShapePath();
+
+    // Tokenize SVG path data
+    const tokens = this.tokenizeSVGPath(d);
+    let i = 0;
+
+    let cx = 0; // current x
+    let cy = 0; // current y
+    let startX = 0; // subpath start x
+    let startY = 0; // subpath start y
+    let lastCmd = "";
+    let lastCtrlX = 0; // for smooth curves
+    let lastCtrlY = 0;
+
+    const applyTransform = (x: number, y: number): [number, number] => {
+      if (!transform) return [x, -y];
+      return [
+        transform.a * x + transform.c * y + transform.e,
+        -(transform.b * x + transform.d * y + transform.f),
+      ];
+    };
+
+    while (i < tokens.length) {
+      const cmd = tokens[i];
+      if (typeof cmd !== "string" || cmd.length !== 1 || !/[MLHVQCSATZmlhvqcsatz]/.test(cmd)) {
+        i++;
+        continue;
+      }
+      i++;
+
+      const isRelative = cmd === cmd.toLowerCase() && cmd !== "z" && cmd !== "Z";
+      const upper = cmd.toUpperCase();
+
+      // Each command can repeat with implicit repetition
+      do {
+        switch (upper) {
+          case "M": {
+            const nx = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const ny = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            [cx, cy] = [nx, ny];
+            startX = cx;
+            startY = cy;
+            const [tx, ty] = applyTransform(cx, cy);
+            shapePath.moveTo(tx, ty);
+            // Subsequent coords after M are implicit L
+            lastCmd = isRelative ? "l" : "L";
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            continue;
+          }
+          case "L": {
+            const nx = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const ny = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            [cx, cy] = [nx, ny];
+            const [tx, ty] = applyTransform(cx, cy);
+            shapePath.lineTo(tx, ty);
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            break;
+          }
+          case "H": {
+            const nx = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            cx = nx;
+            const [tx, ty] = applyTransform(cx, cy);
+            shapePath.lineTo(tx, ty);
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            break;
+          }
+          case "V": {
+            const ny = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            cy = ny;
+            const [tx, ty] = applyTransform(cx, cy);
+            shapePath.lineTo(tx, ty);
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            break;
+          }
+          case "Q": {
+            const qx1 = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const qy1 = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            const qx = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const qy = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            lastCtrlX = qx1;
+            lastCtrlY = qy1;
+            [cx, cy] = [qx, qy];
+            const [tc1x, tc1y] = applyTransform(qx1, qy1);
+            const [tex, tey] = applyTransform(cx, cy);
+            shapePath.quadraticCurveTo(tc1x, tc1y, tex, tey);
+            break;
+          }
+          case "T": {
+            // Smooth quadratic: control point is reflection of last Q control
+            const qx1 = 2 * cx - lastCtrlX;
+            const qy1 = 2 * cy - lastCtrlY;
+            const qx = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const qy = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            lastCtrlX = qx1;
+            lastCtrlY = qy1;
+            [cx, cy] = [qx, qy];
+            const [tc1x, tc1y] = applyTransform(qx1, qy1);
+            const [tex, tey] = applyTransform(cx, cy);
+            shapePath.quadraticCurveTo(tc1x, tc1y, tex, tey);
+            break;
+          }
+          case "C": {
+            const cx1 = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const cy1 = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            const cx2 = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const cy2 = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            const ex = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const ey = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            lastCtrlX = cx2;
+            lastCtrlY = cy2;
+            [cx, cy] = [ex, ey];
+            const [tb1x, tb1y] = applyTransform(cx1, cy1);
+            const [tb2x, tb2y] = applyTransform(cx2, cy2);
+            const [tbex, tbey] = applyTransform(cx, cy);
+            shapePath.bezierCurveTo(tb1x, tb1y, tb2x, tb2y, tbex, tbey);
+            break;
+          }
+          case "S": {
+            // Smooth cubic: first control is reflection of last C's second control
+            const cx1 = 2 * cx - lastCtrlX;
+            const cy1 = 2 * cy - lastCtrlY;
+            const cx2 = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const cy2 = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            const ex = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const ey = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+            lastCtrlX = cx2;
+            lastCtrlY = cy2;
+            [cx, cy] = [ex, ey];
+            const [tb1x, tb1y] = applyTransform(cx1, cy1);
+            const [tb2x, tb2y] = applyTransform(cx2, cy2);
+            const [tbex, tbey] = applyTransform(cx, cy);
+            shapePath.bezierCurveTo(tb1x, tb1y, tb2x, tb2y, tbex, tbey);
+            break;
+          }
+          case "A": {
+            let rx = Math.abs(this.nextNum(tokens, i));
+            i++;
+            let ry = Math.abs(this.nextNum(tokens, i));
+            i++;
+            const xAxisRotation = this.nextNum(tokens, i);
+            i++;
+            const largeArcFlag = this.nextNum(tokens, i) !== 0;
+            i++;
+            const sweepFlag = this.nextNum(tokens, i) !== 0;
+            i++;
+            const ex = (isRelative ? cx : 0) + this.nextNum(tokens, i);
+            i++;
+            const ey = (isRelative ? cy : 0) + this.nextNum(tokens, i);
+            i++;
+
+            if (rx === 0 || ry === 0) {
+              // Degenerate arc → line
+              [cx, cy] = [ex, ey];
+              const [tx, ty] = applyTransform(cx, cy);
+              shapePath.lineTo(tx, ty);
+            } else {
+              const curves = this.arcToBezier(
+                cx, cy, rx, ry, xAxisRotation, largeArcFlag, sweepFlag, ex, ey,
+              );
+              for (const [x1, y1, x2, y2, xe, ye] of curves) {
+                const [tb1x, tb1y] = applyTransform(x1, y1);
+                const [tb2x, tb2y] = applyTransform(x2, y2);
+                const [tbex, tbey] = applyTransform(xe, ye);
+                shapePath.bezierCurveTo(tb1x, tb1y, tb2x, tb2y, tbex, tbey);
+              }
+              [cx, cy] = [ex, ey];
+            }
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            break;
+          }
+          case "Z": {
+            if (typeof shapePath.closePath === "function") {
+              shapePath.closePath();
+            } else if (shapePath.currentPath?.closePath) {
+              shapePath.currentPath.closePath();
+            }
+            cx = startX;
+            cy = startY;
+            lastCtrlX = cx;
+            lastCtrlY = cy;
+            break;
+          }
+        }
+
+        lastCmd = cmd;
+      } while (
+        i < tokens.length &&
+        typeof tokens[i] === "number" &&
+        upper !== "Z"
+      );
+    }
+
+    const subPaths = shapePath.subPaths;
+    if (!subPaths || subPaths.length === 0) return [];
+
+    return subPaths
+      .map((sp: any) => {
+        // 64 divisions for area/containment accuracy; actual geometry uses sp directly (curves preserved)
+        const points = sp.getPoints(64);
+        if (!points || points.length < 3) return null;
+        const signedArea = this.THREE.ShapeUtils.area(points);
+        const bbox = this.getBoundingBox(points.map((p: any) => ({ x: p.x, y: p.y })));
+        return { path: sp, points, area: Math.abs(signedArea), signedArea, bbox };
+      })
+      .filter((sp: any) => sp !== null && sp.area > 0);
+  }
+
+  private ensurePathWinding(path: any, points: any[], clockwise: boolean): any {
+    const isClockwise = this.THREE.ShapeUtils.isClockWise(points);
+    return isClockwise === clockwise ? path : this.reversePath(path);
+  }
+
+  private clonePathAsShape(path: any): any {
+    const shape = new this.THREE.Shape();
+    shape.curves = path.curves.slice();
+    if (path.currentPoint) {
+      shape.currentPoint.copy(path.currentPoint);
+    }
+    return shape;
+  }
+
+  private tokenizeSVGPath(d: string): Array<string | number> {
+    const tokens: Array<string | number> = [];
+    // Split on commands and numbers (including negative and scientific notation)
+    const re = /([MLHVQCSATZmlhvqcsatz])|([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/g;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(d)) !== null) {
+      if (match[1]) {
+        tokens.push(match[1]);
+      } else if (match[2]) {
+        tokens.push(parseFloat(match[2]));
+      }
+    }
+    return tokens;
+  }
+
+  private nextNum(tokens: Array<string | number>, i: number): number {
+    const v = tokens[i];
+    return typeof v === "number" ? v : 0;
+  }
+
+  // Convert SVG arc to bezier curves
+  // Returns array of [x1,y1, x2,y2, ex,ey] control points for each bezier segment
+  private arcToBezier(
+    x1: number,
+    y1: number,
+    rx: number,
+    ry: number,
+    xAxisRotationDeg: number,
+    largeArcFlag: boolean,
+    sweepFlag: boolean,
+    x2: number,
+    y2: number,
+  ): Array<[number, number, number, number, number, number]> {
+    const phi = (xAxisRotationDeg * Math.PI) / 180;
+    const cosPhi = Math.cos(phi);
+    const sinPhi = Math.sin(phi);
+
+    const dx = (x1 - x2) / 2;
+    const dy = (y1 - y2) / 2;
+    const x1p = cosPhi * dx + sinPhi * dy;
+    const y1p = -sinPhi * dx + cosPhi * dy;
+
+    const x1pSq = x1p * x1p;
+    const y1pSq = y1p * y1p;
+    let rxSq = rx * rx;
+    let rySq = ry * ry;
+
+    // Ensure radii are large enough
+    const lambda = x1pSq / rxSq + y1pSq / rySq;
+    if (lambda > 1) {
+      const sqrtLambda = Math.sqrt(lambda);
+      rx *= sqrtLambda;
+      ry *= sqrtLambda;
+      rxSq = rx * rx;
+      rySq = ry * ry;
+    }
+
+    const sign = largeArcFlag !== sweepFlag ? 1 : -1;
+    const num = Math.max(0, rxSq * rySq - rxSq * y1pSq - rySq * x1pSq);
+    const den = rxSq * y1pSq + rySq * x1pSq;
+    const sq = sign * Math.sqrt(num / den);
+
+    const cxp = sq * (rx * y1p) / ry;
+    const cyp = sq * -(ry * x1p) / rx;
+
+    const cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2;
+    const cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2;
+
+    const ux = (x1p - cxp) / rx;
+    const uy = (y1p - cyp) / ry;
+    const vx = (-x1p - cxp) / rx;
+    const vy = (-y1p - cyp) / ry;
+
+    const angle1 = Math.atan2(uy, ux);
+    let dAngle = Math.atan2(vy, vx) - angle1;
+
+    if (!sweepFlag && dAngle > 0) dAngle -= 2 * Math.PI;
+    if (sweepFlag && dAngle < 0) dAngle += 2 * Math.PI;
+
+    const segments = Math.ceil(Math.abs(dAngle) / (Math.PI / 2));
+    const delta = dAngle / segments;
+    const t = (8 / 3) * Math.sin(delta / 4) * Math.sin(delta / 4) / Math.sin(delta / 2);
+
+    const result: Array<[number, number, number, number, number, number]> = [];
+    let startAngle = angle1;
+
+    for (let s = 0; s < segments; s++) {
+      const endAngle = startAngle + delta;
+
+      const cosStart = Math.cos(startAngle);
+      const sinStart = Math.sin(startAngle);
+      const cosEnd = Math.cos(endAngle);
+      const sinEnd = Math.sin(endAngle);
+
+      const px1 = cosPhi * rx * cosStart - sinPhi * ry * sinStart + cx;
+      const py1 = sinPhi * rx * cosStart + cosPhi * ry * sinStart + cy;
+      const px2 = cosPhi * rx * cosEnd - sinPhi * ry * sinEnd + cx;
+      const py2 = sinPhi * rx * cosEnd + cosPhi * ry * sinEnd + cy;
+
+      const dx1 = cosPhi * rx * (-sinStart) - sinPhi * ry * cosStart;
+      const dy1 = sinPhi * rx * (-sinStart) + cosPhi * ry * cosStart;
+      const dx2 = cosPhi * rx * (-sinEnd) - sinPhi * ry * cosEnd;
+      const dy2 = sinPhi * rx * (-sinEnd) + cosPhi * ry * cosEnd;
+
+      result.push([
+        px1 + t * dx1,
+        py1 + t * dy1,
+        px2 - t * dx2,
+        py2 - t * dy2,
+        px2,
+        py2,
+      ]);
+
+      startAngle = endAngle;
+    }
+
+    return result;
   }
 
   private buildLineShapes(
@@ -1058,6 +1594,8 @@ export class ThreeJSEngine implements I3DEngine {
           prev.count !== this.cfg.count ||
           prev.seed !== this.cfg.seed ||
           prev.spread !== this.cfg.spread ||
+          prev.spreadX !== this.cfg.spreadX ||
+          prev.spreadY !== this.cfg.spreadY ||
           prev.particleShape !== this.cfg.particleShape ||
           prev.particleModelUrl !== this.cfg.particleModelUrl ||
           prev.particleModelLoader !== this.cfg.particleModelLoader ||
@@ -1069,15 +1607,6 @@ export class ThreeJSEngine implements I3DEngine {
           prev.instanceScale !== this.cfg.instanceScale ||
           prev.instanceScaleVariation !== this.cfg.instanceScaleVariation;
         if (needsRebuild) {
-          const isParticleModelChange =
-            this.cfg.mode === "instanced" &&
-            this.instanced &&
-            this.cfg.modelTransitionDuration > 0 &&
-            (prev.particleModelUrl !== this.cfg.particleModelUrl ||
-              prev.particleModelLoader !== this.cfg.particleModelLoader ||
-              prev.particleModelNode !== this.cfg.particleModelNode ||
-              prev.particleShape !== this.cfg.particleShape);
-
           const isInstanceModelChange =
             this.cfg.mode === "instanced" &&
             this.instanced &&
@@ -1087,7 +1616,7 @@ export class ThreeJSEngine implements I3DEngine {
               prev.instanceModelNode !== this.cfg.instanceModelNode ||
               prev.instanceShape !== this.cfg.instanceShape);
 
-          if (isParticleModelChange || isInstanceModelChange) {
+          if (isInstanceModelChange) {
             this.startModelTransition();
           } else {
             this.refreshModelGeometry();

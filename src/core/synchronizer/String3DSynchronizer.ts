@@ -6,6 +6,7 @@ import { LightSynchronizer } from "./LightSynchronizer";
 import { MeshSynchronizer } from "./MeshSynchronizer";
 import { ParticlesSynchronizer } from "./ParticlesSynchronizer";
 import { TextSynchronizer } from "./TextSynchronizer";
+import { SVGSynchronizer } from "./SVGSynchronizer";
 import type { String3DScene } from "../String3DScene";
 import type { String3DObjectSyncStrategy } from "./String3DObjectSyncStrategy";
 
@@ -34,6 +35,7 @@ export class String3DSynchronizer {
     this.strategies.set("hemisphereLight", new LightSynchronizer());
     this.strategies.set("particles", new ParticlesSynchronizer());
     this.strategies.set("text", new TextSynchronizer());
+    this.strategies.set("svg", new SVGSynchronizer());
   }
 
   public syncElement(

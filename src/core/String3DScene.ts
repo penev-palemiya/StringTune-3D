@@ -166,6 +166,9 @@ export class String3DScene {
         case "text":
           this.createText(object, onAdd);
           break;
+        case "svg":
+          this.createSVG(object, onAdd);
+          break;
         default:
           break;
       }
@@ -428,6 +431,22 @@ export class String3DScene {
     group.add(mesh);
 
     const obj = new String3DObject(object.id, "text", group, this.engine, {
+      geometry,
+      material,
+    });
+    onAdd(obj);
+  }
+
+  private createSVG(object: String3DSourceObject, onAdd: (obj: String3DObject) => void): void {
+    const geometry = this.engine.createBoxGeometry(1, 1, 1);
+    const material = this.createMaterialFromObject(object);
+    const mesh = this.engine.createMesh(geometry, material);
+    this.applyShadowProps(object, mesh);
+
+    const group = this.engine.createGroup();
+    group.add(mesh);
+
+    const obj = new String3DObject(object.id, "svg", group, this.engine, {
       geometry,
       material,
     });

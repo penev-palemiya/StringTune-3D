@@ -226,6 +226,23 @@ export type TextGeometryOptions = {
   elementHeight?: number;
 };
 
+export type SVGGeometryOptions = {
+  depth: number;
+  curveSegments: number;
+  bevelEnabled: boolean;
+  bevelThickness: number;
+  bevelSize: number;
+  bevelOffset: number;
+  bevelSegments: number;
+};
+
+export type SVGPathData = {
+  d: string;
+  transform: { a: number; b: number; c: number; d: number; e: number; f: number } | null;
+};
+
+export type SVGViewBox = { x: number; y: number; width: number; height: number };
+
 export interface I3DModelLoader {
   load(
     url: string,
@@ -387,6 +404,11 @@ export interface I3DEngine {
   applyTextGeometryToMesh(mesh: I3DMesh, geometry: I3DGeometry): boolean;
   loadFont?(url: string): Promise<any>;
   createTextGeometry?(text: string, font: any, options: TextGeometryOptions): I3DGeometry | null;
+  createSVGGeometry?(
+    paths: SVGPathData[],
+    viewBox: SVGViewBox | null,
+    options: SVGGeometryOptions,
+  ): I3DGeometry | null;
   getTextGeometryLayoutSignature?(context: {
     text: string;
     layoutSignature: string;

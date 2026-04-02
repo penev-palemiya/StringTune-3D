@@ -2,6 +2,17 @@ export { String3D } from "./modules/String3D";
 export type { String3DOptions } from "./modules/String3D";
 
 export type {
+  SVGGeometryOptions,
+  SVGPathData,
+  SVGViewBox,
+} from "./core/abstractions/I3DEngine";
+
+export { SVGParser } from "./core/svg";
+export type { ParsedSVGData, ParsedSVGPath, SVGTransformMatrix } from "./core/svg";
+
+export { SVGSynchronizer } from "./core/synchronizer/SVGSynchronizer";
+
+export type {
   I3DEngine,
   I3DVector3,
   I3DVector2,

@@ -290,8 +290,8 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
     const layoutSig =
       layout.length > 0
         ? `${layout.length}:${layout[0].x.toFixed(1)},${layout[0].y.toFixed(1)}:${layout[
-            layout.length - 1
-          ].x.toFixed(1)},${layout[layout.length - 1].y.toFixed(1)}`
+          layout.length - 1
+        ].x.toFixed(1)},${layout[layout.length - 1].y.toFixed(1)}`
         : "empty";
     const effectiveLayoutSig =
       ctx.engine.getTextGeometryLayoutSignature?.({
@@ -603,11 +603,11 @@ export class TextSynchronizer implements String3DObjectSyncStrategy {
         fontCss && fontCss.length > 0
           ? fontCss
           : [
-              style.fontStyle || "normal",
-              style.fontWeight || "normal",
-              `${style.fontSize || "16px"}/${style.lineHeight || "normal"}`,
-              style.fontFamily || "sans-serif",
-            ].join(" ");
+            style.fontStyle || "normal",
+            style.fontWeight || "normal",
+            `${style.fontSize || "16px"}/${style.lineHeight || "normal"}`,
+            style.fontFamily || "sans-serif",
+          ].join(" ");
 
       return {
         translateZ: readNumber("--translate-z", 0),
